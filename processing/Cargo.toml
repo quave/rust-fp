@@ -38,6 +38,9 @@ clap = { version = "4.4", features = ["derive"] }
 jsonschema = "0.29.1"
 http.workspace = true
 
+[dev-dependencies]
+serial_test = "3.2.0"
+
 [lib]
 name = "processing"
 path = "src/lib.rs"

@@ -20,8 +20,21 @@ use ecom::{
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = initialize_executable()?;
     
-    // Create common storage
-    let common_storage = Arc::new(ProdCommonStorage::new(&config.common.database_url).await?);
+    // Create matcher configs from processor config if available
+    let matcher_configs = if let Some(configs) = &config.processor.matcher_configs {
+        configs.clone()
+    } else {
+        std::collections::HashMap::new()
+    };
+    
+    // Create common storage with matcher configs
+    let common_storage = Arc::new(
+        if !matcher_configs.is_empty() {
+            ProdCommonStorage::with_configs(&config.common.database_url, matcher_configs).await?
+        } else {
+            ProdCommonStorage::new(&config.common.database_url).await?
+        }
+    );
     
     // Create model storage
     let model_storage = Arc::new(EcomOrderStorage::new(&config.common.database_url).await?);

@@ -9,7 +9,12 @@ pub type ModelId = i64;
 pub trait Processible: Send + Sync {
     fn id(&self) -> ModelId;
     fn tx_id(&self) -> ModelId;
-    fn extract_features(&self) -> Vec<Feature>;
+    fn extract_features(
+        &self,
+        connected_transactions: &[ConnectedTransaction],
+        direct_connections: &[DirectConnection]
+    ) -> Vec<Feature>;
+    fn extract_matching_fields(&self) -> Vec<MatchingField>;
 }
 
 #[async_trait]
@@ -36,6 +41,12 @@ pub struct TriggeredRule {
     pub rule_score: i32,
     #[serde(with = "ts_seconds")]
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MatchingField {
+    pub matcher: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,4 +272,37 @@ impl PartialEq for ScorerResult {
     fn eq(&self, other: &Self) -> bool {
         self.score == other.score && self.name == other.name
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectedTransaction {
+    pub transaction_id: ModelId,
+    pub path_matchers: Vec<String>,
+    pub path_values: Vec<String>,
+    pub depth: i32,
+    pub confidence: i32,
+    pub importance: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+impl PartialEq for ConnectedTransaction {
+    fn eq(&self, other: &Self) -> bool {
+        self.transaction_id == other.transaction_id &&
+        self.path_matchers == other.path_matchers &&
+        self.path_values == other.path_values &&
+        self.depth == other.depth &&
+        self.confidence == other.confidence &&
+        self.importance == other.importance &&
+        self.created_at == other.created_at
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectConnection {
+    pub transaction_id: ModelId,
+    pub matcher: String,
+    pub confidence: i32,
+    pub importance: i32,
+    #[serde(with = "ts_seconds")]
+    pub created_at: DateTime<Utc>,
 }

@@ -24,6 +24,8 @@ pub struct ProcessorConfig {
     pub threads: u32,
     pub sleep_ms: u64,
     pub log_level: String,
+    #[serde(default)]
+    pub matcher_configs: Option<std::collections::HashMap<String, (i32, i32)>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

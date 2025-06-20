@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{serde::ts_seconds, DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use processing::model::{Feature, FeatureValue, ModelId, Processible, WebTransaction};
+use processing::model::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DbOrderItem {
@@ -108,5 +108,18 @@ impl Processible for Order {
 
     fn id(&self) -> ModelId {
         self.order.id
+    }
+
+    fn extract_matching_fields(&self) -> Vec<MatchingField> {
+        vec![
+            MatchingField {
+                matcher: "customer.email".to_string(),
+                value: self.customer.email.clone(),
+            },
+            MatchingField {
+                matcher: "billing.payment_details".to_string(),
+                value: self.billing.payment_details.clone(),
+            }
+        ]
     }
 }
