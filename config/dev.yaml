@@ -4,4 +4,4 @@ importer:
   log_level: debug
 
 processor:
-  log_level: debug
+  log_level: debug,sqlx=info

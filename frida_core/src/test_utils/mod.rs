@@ -1,7 +1,9 @@
 use std::{collections::VecDeque, sync::Mutex};
+use sqlx::PgPool;
+
 
 use crate::{
-    model::{ModelId, Processible},
+    model::ModelId,
     queue::QueueService,
 };
 
@@ -20,13 +22,27 @@ impl MockQueue {
 }
 
 #[async_trait::async_trait]
-impl<P: Processible> QueueService<P> for MockQueue {
+impl QueueService for MockQueue {
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.queue.lock().unwrap().push_back(id.clone());
         Ok(())
     }
 
-    async fn dequeue(&self) -> Result<Option<ModelId>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.queue.lock().unwrap().pop_front())
     }
+
+    async fn mark_processed(&self, _id: ModelId) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
 }
+
+/// Initialize database schema for testing using SQLx migrations
+pub async fn initialize_test_schema(pool: &PgPool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    sqlx::migrate!("../migrations")
+        .run(pool)
+        .await?;
+
+    Ok(())
+}
+

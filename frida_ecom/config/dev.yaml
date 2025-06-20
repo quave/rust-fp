@@ -2,4 +2,4 @@
 
 importer:
   project_name: frida_ecom
-  database_url: sqlite:dev.sqlite3
+  database_url: postgresql://frida:frida@0.0.0.0:5432/frida

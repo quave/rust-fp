@@ -8,10 +8,10 @@ services:
       - "3001:3000"
     environment:
       - RUST_LOG=debug
-      - DATABASE_URL=sqlite:///app/${PROFILE}.sqlite3
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://frida:frida@0.0.0.0:5432/frida
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
       interval: 5s
@@ -23,17 +23,26 @@ services:
     command: processor --config /usr/local/bin/frida_ecom/config/${PROFILE}.yaml
     environment:
       - RUST_LOG=debug
-      - DATABASE_URL=sqlite:///app/${PROFILE}.sqlite3
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://frida:frida@0.0.0.0:5432/frida
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
 
-  redis:
-    image: redis:7-alpine
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: frida
+      POSTGRES_USER: frida
+      POSTGRES_PASSWORD: frida
     ports:
-      - "6379:6379"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: [ "CMD-SHELL", "pg_isready -U frida -d frida" ]
       interval: 5s
       timeout: 5s
-      retries: 3
+      retries: 5
+
+volumes:
+  postgres_data:

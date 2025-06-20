@@ -4,7 +4,7 @@ use std::{error::Error, fmt::Debug, sync::Arc};
 use crate::{
     config::{Config, ImporterConfig},
     importer::Importer,
-    model::{Importable, ImportableSerde, Processible},
+    model::{Importable, ImportableSerde},
     queue::QueueService,
     storage::ImportableStorage,
 };
@@ -55,23 +55,22 @@ pub fn initialize_executable() -> Result<Config, Box<dyn Error + Send + Sync>> {
     Ok(config)
 }
 
-pub async fn run_importer<I, P>(
+pub async fn run_importer<I>(
     config: ImporterConfig,
     storage: Arc<dyn ImportableStorage<I>>,
-    queue: Arc<dyn QueueService<P>>,
+    queue: Arc<dyn QueueService>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-    P: Processible + 'static,
     I: ImportableSerde + 'static,
 {
-    let service = web::Data::new(Importer::<I, P>::new(storage, queue));
+    let service = web::Data::new(Importer::<I>::new(storage, queue));
 
     log::info!("Starting importer service at {}", config.server_address);
     HttpServer::new(move || {
         App::new()
             .app_data(service.clone())
             .wrap(Logger::default())
-            .route("/import", web::post().to(import_transaction::<I, P>))
+            .route("/import", web::post().to(import_transaction::<I>))
             .service(health_check)
     })
     .bind(&config.server_address)?
@@ -81,12 +80,11 @@ where
     Ok(())
 }
 
-pub async fn import_transaction<I, P>(
-    importer: web::Data<Importer<I, P>>,
+pub async fn import_transaction<I>(
+    importer: web::Data<Importer<I>>,
     transaction: web::Json<I>,
 ) -> HttpResponse
 where
-    P: Processible,
     I: Importable,
 {
     match importer.import(transaction.into_inner()).await {

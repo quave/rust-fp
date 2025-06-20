@@ -1,4 +1,6 @@
 /target
+.lsp/
+.clj-kondo/
 .vscode/
 *.swp
 *.sqlite3

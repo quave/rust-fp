@@ -1,7 +1,7 @@
 use crate::{
     model::Processible,
     queue::QueueService,
-    scorer::Scorer,
+    scorers::Scorer,
     storage::{CommonStorage, ProcessibleStorage},
 };
 use log::{debug, info, trace, warn};
@@ -11,7 +11,7 @@ pub struct Processor<P: Processible, S: Scorer> {
     scorer: S,
     common_storage: Arc<dyn CommonStorage>,
     processible_storage: Arc<dyn ProcessibleStorage<P>>,
-    queue: Arc<dyn QueueService<P>>,
+    queue: Arc<dyn QueueService>,
 }
 
 impl<P, S> Processor<P, S>
@@ -23,7 +23,7 @@ where
         scorer: S,
         common_storage: Arc<dyn CommonStorage>,
         processible_storage: Arc<dyn ProcessibleStorage<P>>,
-        queue: Arc<dyn QueueService<P>>,
+        queue: Arc<dyn QueueService>,
     ) -> Self {
         info!("Initializing new Processor");
         Self {
@@ -37,29 +37,20 @@ where
     pub async fn process(&self) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
         trace!("Starting processing cycle");
 
-        // Try to get a transaction from the queue
-        if let Some(transaction_id) = self.queue.dequeue().await? {
+        if let Some(transaction_id) = self.queue.fetch_next().await? {
             info!("Processing transaction with ID: {:?}", &transaction_id);
 
-            // Get transaction details
-            let transaction = match self
+            let order = self
                 .processible_storage
-                .get_transaction(transaction_id)
-                .await
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    warn!("Failed to get transaction {}: {}", transaction_id, e);
-                    return Err(e);
-                }
-            };
+                .get_processible(transaction_id)
+                .await?;
 
             // Extract and save features
             debug!("Extracting features for transaction {:?}", &transaction_id);
-            let features = transaction.extract_features();
+            let features = order.extract_features();
             if let Err(e) = self
-                .processible_storage
-                .save_features(transaction.id(), &features)
+                .common_storage
+                .save_features(order.tx_id(), &features)
                 .await
             {
                 warn!("Failed to save features for {}: {}", transaction_id, e);
@@ -72,7 +63,7 @@ where
             let result = self.scorer.score(features).await;
             if let Err(e) = self
                 .common_storage
-                .save_scores(transaction.id(), &result)
+                .save_scores(order.tx_id(), &result)
                 .await
             {
                 warn!("Failed to save scores for {}: {}", transaction_id, e);
@@ -83,7 +74,10 @@ where
                 transaction_id
             );
 
-            Ok(Some(transaction))
+            // Only mark as processed if successful
+            self.queue.mark_processed(transaction_id).await?;
+
+            Ok(Some(order))
         } else {
             trace!("No transactions in queue");
             Ok(None)

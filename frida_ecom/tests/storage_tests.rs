@@ -1,15 +1,14 @@
 use std::error::Error;
 
-use frida_core::storage::{ImportableStorage, ProcessibleStorage};
-use frida_ecom::{ecom_import_model::*, sqlite_order_storage::SqliteOrderStorage};
+use frida_core::{storage::{ImportableStorage, ProcessibleStorage}, test_utils::initialize_test_schema};
+use frida_ecom::{ecom_import_model::*, ecom_order_storage::EcomOrderStorage};
 
-async fn setup_test_db() -> SqliteOrderStorage {
-    let storage = SqliteOrderStorage::new(":memory:")
+async fn setup_test_db() -> EcomOrderStorage {
+    let storage = EcomOrderStorage::new("postgresql://frida:frida@0.0.0.0:5432/frida_test")
         .await
         .expect("Failed to create storage");
 
-    storage
-        .initialize_schema()
+    initialize_test_schema(&storage.pool)
         .await
         .expect("Failed to initialize schema");
 
@@ -43,7 +42,7 @@ async fn test_save_and_retrieve_order() -> Result<(), Box<dyn Error + Send + Syn
     let id: i64 = storage.save_transaction(&test_order).await?;
 
     // Test retrieving
-    let retrieved_order = storage.get_transaction(id).await?;
+    let retrieved_order = storage.get_processible(id).await?;
 
     assert_eq!(test_order.order_number, retrieved_order.order.order_number);
     assert_eq!(test_order.customer.name, retrieved_order.customer.name);

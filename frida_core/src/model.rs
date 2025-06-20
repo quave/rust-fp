@@ -7,7 +7,7 @@ pub type ModelId = i64;
 
 #[async_trait]
 pub trait Processible: Send + Sync {
-    fn id(&self) -> ModelId;
+    fn tx_id(&self) -> ModelId;
     fn extract_features(&self) -> Vec<Feature>;
     fn as_json(&self) -> Result<String, Box<dyn Error + Send + Sync>>;
 }
@@ -25,10 +25,17 @@ pub trait ImportableSerde: Importable + DeserializeOwned {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggeredRule {
-    pub id: i64,
-    pub order_id: i64,
+    pub id: ModelId,
+    pub transaction_id: ModelId,
     pub rule_name: String,
     pub rule_score: i32,
+    #[serde(with = "ts_seconds")]
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Transaction {
+    pub id: ModelId,
     #[serde(with = "ts_seconds")]
     pub created_at: DateTime<Utc>,
 }
@@ -54,6 +61,6 @@ pub struct Feature {
 }
 
 pub struct ScorerResult {
-    pub score: f32,
+    pub score: i32,
     pub name: String,
 }

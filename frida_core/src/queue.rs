@@ -1,73 +1,79 @@
 use async_trait::async_trait;
 use log::info;
-use sqlx::{Pool, Sqlite};
+use sqlx::PgPool;
 use std::error::Error;
-use std::marker::PhantomData;
 
-use crate::model::{ModelId, Processible};
+use crate::model::ModelId;
 
 // Queue service interface
 #[async_trait]
-pub trait QueueService<P: Processible>: Send + Sync {
+pub trait QueueService: Send + Sync {
+    async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>>;
+    async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
-    async fn dequeue(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>>;
 }
 
-pub struct ProdQueue<P: Processible> {
-    pool: Pool<Sqlite>,
-    _phantom: PhantomData<P>,
+pub struct ProdQueue {
+    pool: PgPool,
 }
 
-impl<P: Processible> ProdQueue<P> {
+impl ProdQueue {
     pub async fn new(database_url: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let pool = sqlx::SqlitePool::connect(database_url).await?;
+        let pool = PgPool::connect(database_url).await?;
         Ok(Self {
             pool,
-            _phantom: PhantomData,
         })
     }
 }
 
 #[async_trait]
-impl<P: Processible> QueueService<P> for ProdQueue<P> {
+impl QueueService for ProdQueue {
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!("Enqueuing transaction to SQLite: {:?}", id);
-        sqlx::query("INSERT INTO processing_queue (processable_id) VALUES (?)")
-            .bind(serde_json::to_string(&id)?)
+        info!("Enqueuing transaction to the db: {:?}", id);
+        sqlx::query("INSERT INTO processing_queue (processable_id) VALUES ($1)")
+            .bind(&id)
             .execute(&self.pool)
             .await?;
 
         Ok(())
     }
 
-    async fn dequeue(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>> {
-        let result = sqlx::query!(
+    async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>> {
+        let mut tx = self.pool.begin().await?;
+
+        let record = sqlx::query!(
             r#"
-            UPDATE processing_queue 
-            SET processed_at = CURRENT_TIMESTAMP
-            WHERE id = (
-                SELECT id FROM processing_queue 
-                WHERE processed_at IS NULL 
-                ORDER BY created_at ASC 
-                LIMIT 1
-            )
-            RETURNING processable_id as "processable_id: i64"
+            SELECT id, processable_id
+            FROM processing_queue
+            WHERE processed_at IS NULL
+            ORDER BY created_at ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
             "#
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?;
 
-        match result {
-            Some(record) => {
-                info!(
-                    "Dequeued transaction from SQLite: {}",
-                    record.processable_id
-                );
-                let id: ModelId =
-                    serde_json::from_str::<ModelId>(&record.processable_id.to_string())?;
-                Ok(Some(id))
-            }
-            None => Ok(None),
+        if let Some(record) = record {
+            tx.commit().await?;
+            Ok(Some(record.processable_id))
+        } else {
+            Ok(None)
         }
+    }
+
+    async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
+        sqlx::query!(
+            r#"
+            UPDATE processing_queue
+            SET processed_at = NOW()
+            WHERE processable_id = $1
+            "#,
+            id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }

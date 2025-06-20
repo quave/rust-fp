@@ -1,18 +1,18 @@
 use actix_web::{test, web, App};
-use frida_core::storage::ImportableStorage;
+use frida_core::executable_utils::{health_check, import_transaction};
+use frida_core::test_utils::initialize_test_schema;
 use frida_core::test_utils::MockQueue;
 use frida_ecom::{
-    ecom_db_model::Order, ecom_import_model::ImportOrder, sqlite_order_storage::SqliteOrderStorage,
+    ecom_import_model::ImportOrder, ecom_order_storage::EcomOrderStorage,
 };
-use frida_ecom::{health_check, import_transaction};
 use serde_json::json;
 use std::sync::Arc;
 
 #[actix_web::test]
 async fn test_import_endpoint() {
     // Initialize test database
-    let storage = Arc::new(SqliteOrderStorage::new("sqlite::memory:").await.unwrap());
-    storage.initialize_schema().await.unwrap();
+    let storage = Arc::new(EcomOrderStorage::new("postgresql://frida:frida@0.0.0.0:5432/frida_test").await.unwrap());
+    initialize_test_schema(&storage.pool).await.unwrap();
 
     // Initialize mock queue
     let queue = Arc::new(MockQueue::new());
@@ -22,12 +22,11 @@ async fn test_import_endpoint() {
         App::new()
             .app_data(web::Data::new(frida_core::importer::Importer::<
                 ImportOrder,
-                Order,
             >::new(storage, queue)))
             .service(health_check)
             .route(
                 "/import",
-                web::post().to(import_transaction::<ImportOrder, Order>),
+                web::post().to(import_transaction::<ImportOrder>),
             ),
     )
     .await;

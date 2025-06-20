@@ -1,21 +1,21 @@
 use std::{error::Error, sync::Arc};
 
 use crate::{
-    model::{Importable, ImportableSerde, ModelId, Processible},
+    model::{Importable, ImportableSerde, ModelId},
     queue::QueueService,
     storage::ImportableStorage,
 };
 use log::{debug, info};
 
-pub struct Importer<I: Importable, P: Processible> {
+pub struct Importer<I: Importable> {
     importable_storage: Arc<dyn ImportableStorage<I>>,
-    queue: Arc<dyn QueueService<P>>,
+    queue: Arc<dyn QueueService>,
 }
 
-impl<I: Importable, P: Processible> Importer<I, P> {
+impl<I: Importable> Importer<I> {
     pub fn new(
         importable_storage: Arc<dyn ImportableStorage<I>>,
-        queue: Arc<dyn QueueService<P>>,
+        queue: Arc<dyn QueueService>,
     ) -> Self {
         info!("Initializing new Importer");
         Self {

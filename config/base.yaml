@@ -1,6 +1,6 @@
 common:
   project_name: noname
-  database_url: sqlite:dev.sqlite3
+  database_url: postgresql://frida:frida@0.0.0.0:5432/frida
 
 importer:
   server_address: 0.0.0.0:3000

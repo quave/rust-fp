@@ -2,11 +2,11 @@ use std::{error::Error, time::Duration};
 
 use frida_core::{
     executable_utils::initialize_executable, model::Processible, processor::Processor,
-    queue::ProdQueue, storage::ProdCommonStorage,
+    queue::ProdQueue, scorers::RuleBasedScorer, storage::ProdCommonStorage,
 };
 use frida_ecom::{
-    ecom_db_model::Order, rule_based_scorer::RuleBasedScorer,
-    sqlite_order_storage::SqliteOrderStorage,
+    ecom_db_model::Order, ecom_order_storage::EcomOrderStorage,
+    rule_based_scorer::get_rule_based_scorer,
 };
 use log::{error, info, trace};
 use std::sync::Arc;
@@ -20,13 +20,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let common_storage = Arc::new(ProdCommonStorage::new(&config.common.database_url).await?);
     info!("Storage common initialized");
 
-    let model_storage = Arc::new(SqliteOrderStorage::new(&config.common.database_url).await?);
+    let model_storage = Arc::new(EcomOrderStorage::new(&config.common.database_url).await?);
     info!("Storage model initialized");
 
     let queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
     info!("Queue initialized");
 
-    let scorer = RuleBasedScorer::new();
+    let scorer = get_rule_based_scorer();
     info!("Scorer initialized");
 
     // Create processor
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             loop {
                 match processor.process().await {
                     Ok(Some(transaction)) => {
-                        info!("Processed transaction: {:?}", transaction.id());
+                        info!("Processed transaction: {:?}", transaction.tx_id());
                     }
                     Ok(None) => {
                         trace!("No transactions to process, sleeping...");

@@ -4,6 +4,6 @@ pub mod importer;
 pub mod model;
 pub mod processor;
 pub mod queue;
-pub mod scorer;
+pub mod scorers;
 pub mod storage;
 pub mod test_utils;
