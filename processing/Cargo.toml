@@ -36,6 +36,7 @@ tower-http = { workspace = true, features = ["trace"] }
 tower = { workspace = true }
 clap = { version = "4.4", features = ["derive"] }
 jsonschema = "0.29.1"
+http.workspace = true
 
 [lib]
 name = "processing"

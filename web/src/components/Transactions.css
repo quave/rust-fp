@@ -1,0 +1,165 @@
+.transactions-container {
+  background-color: #1a1b1e;
+  border-radius: 8px;
+  overflow: hidden;
+  color: #fff;
+  min-height: 100vh;
+}
+
+.header {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.5rem;
+}
+
+.controls {
+  padding: 1.5rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2rem;
+}
+
+.search-container {
+  position: relative;
+  flex: 1;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  background-color: #2a2b2e;
+  border: 1px solid #3a3b3e;
+  border-radius: 25px;
+  color: white;
+  font-size: 1rem;
+}
+
+.search-input::placeholder {
+  color: #9ca3af;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #9ca3af;
+}
+
+.filter-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.filter-buttons button {
+  padding: 0.5rem 1.5rem;
+  border-radius: 20px;
+  border: 1px solid #3a3b3e;
+  background-color: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-buttons button.active {
+  background-color: #8b5cf6;
+  border-color: #8b5cf6;
+  color: white;
+}
+
+.table-container {
+  padding: 0 2rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 0.5rem;
+}
+
+th {
+  text-align: left;
+  padding: 1rem;
+  color: #9ca3af;
+  font-weight: 500;
+  border-bottom: 1px solid #3a3b3e;
+}
+
+td {
+  padding: 1rem;
+  background-color: #2a2b2e;
+  color: #fff;
+}
+
+tr td:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+tr td:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.id-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.user-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.amount {
+  color: #10b981;
+  font-weight: 500;
+}
+
+.status-icon {
+  font-size: 1.25rem;
+}
+
+.status-icon.completed {
+  color: #10b981;
+}
+
+.status-icon.pending {
+  color: #ef4444;
+}
+
+.footer {
+  padding: 1.5rem 2rem;
+  color: #9ca3af;
+  font-size: 0.875rem;
+  border-top: 1px solid #3a3b3e;
+  margin-top: 2rem;
+}
+
+.loading, .error {
+  padding: 2rem;
+  text-align: center;
+  color: #9ca3af;
+} 

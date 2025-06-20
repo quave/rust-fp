@@ -7,7 +7,11 @@ use axum::{
     response::IntoResponse,
     http::StatusCode,
 };
-use tower_http::trace::TraceLayer;
+use tower_http::{
+    trace::TraceLayer,
+    cors::{CorsLayer, Any},
+};
+use http::header;
 use common::config::{Config, ImporterConfig, BackendConfig};
 use crate::{
     importer::Importer,
@@ -75,6 +79,12 @@ where
         .route("/import", post(import_transaction::<I>))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
+        .layer(
+            CorsLayer::new()
+                .allow_origin("http://localhost:8080".parse::<header::HeaderValue>().unwrap())
+                .allow_methods(Any)
+                .allow_headers(Any)
+        )
         .with_state(importer);
 
     tracing::info!("Starting importer service at {}", config.server_address);
@@ -115,12 +125,18 @@ where
     T: WebTransaction + Clone + 'static,
 {
     let app = Router::new()
-        .route("/transactions", get(list_transactions::<T>))
+        .route("/api/transactions", get(list_transactions::<T>))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
+        .layer(
+            CorsLayer::new()
+                .allow_origin("http://localhost:5173".parse::<header::HeaderValue>().unwrap())
+                .allow_methods(Any)
+                .allow_headers(Any)
+        )
         .with_state(storage);
 
-    tracing::info!("Starting importer service at {}", config.server_address);
+    tracing::info!("Starting backend service at {}", config.server_address);
     let listener = tokio::net::TcpListener::bind(&config.server_address).await?;
     axum::serve(listener, app).await?;
 

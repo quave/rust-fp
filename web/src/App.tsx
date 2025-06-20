@@ -1,16 +1,23 @@
-import { Container, Typography, Box } from '@mui/material';
-import { Orders } from './components/Orders';
+import { Container, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { Transactions } from './components/Transactions';
+
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+    background: {
+      default: '#111827',
+    },
+  },
+});
 
 function App() {
   return (
-    <Container maxWidth="lg">
-      <Box sx={{ my: 4 }}>
-        <Typography variant="h3" component="h1" gutterBottom>
-          Welcome to Frida Web
-        </Typography>
-        <Orders />
-      </Box>
-    </Container>
+    <ThemeProvider theme={darkTheme}>
+      <CssBaseline />
+      <Container maxWidth={false} disableGutters>
+        <Transactions />
+      </Container>
+    </ThemeProvider>
   );
 }
 
