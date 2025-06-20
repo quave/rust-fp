@@ -3,6 +3,8 @@ import './Transactions.css';
 import SearchIcon from '@mui/icons-material/Search';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
+import { FilterBuilder } from './FilterBuilder';
+import { FilterRequest, transactionFields } from './FilterTypes';
 
 interface TransactionItem {
   id: number;
@@ -65,6 +67,8 @@ export function Transactions() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [filterRequest, setFilterRequest] = useState<FilterRequest>({ sort: [] });
   
   // Batch labeling state
   const [batchLabelMode, setBatchLabelMode] = useState(false);
@@ -74,23 +78,40 @@ export function Transactions() {
   const [labelingInProgress, setLabelingInProgress] = useState(false);
 
   useEffect(() => {
-    const fetchTransactions = async () => {
-      try {
-        const response = await fetch('http://localhost:8000/api/transactions');
-        if (!response.ok) {
-          throw new Error('Failed to fetch transactions');
-        }
-        const data = await response.json();
-        setTransactions(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'An error occurred');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchTransactions();
   }, []);
+
+  const fetchTransactions = async (customFilter?: FilterRequest) => {
+    setLoading(true);
+    try {
+      // If we have a customFilter, use the new filter endpoint
+      const endpoint = customFilter ? 'http://localhost:8000/api/transactions/filter' : 'http://localhost:8000/api/transactions';
+      const options = customFilter ? {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(customFilter),
+      } : undefined;
+      
+      const response = await fetch(endpoint, options);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch transactions');
+      }
+      const data = await response.json();
+      setTransactions(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApplyFilter = (request: FilterRequest) => {
+    setFilterRequest(request);
+    fetchTransactions(request);
+  };
 
   const toggleTransactionSelection = (transactionId: number) => {
     setSelectedTransactions(prev => {
@@ -160,7 +181,13 @@ export function Transactions() {
     }
   };
 
+  // Use the simpler filter for quick filters
   const filteredTransactions = transactions.filter(transaction => {
+    // Skip filtering if we're using advanced filters
+    if (filterRequest.filter && filterRequest.filter.conditions && filterRequest.filter.conditions.length > 0 || filterRequest.sort?.length > 0) {
+      return true;
+    }
+    
     const matchesSearch = 
       transaction.order.order_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
       transaction.customer.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -212,15 +239,31 @@ export function Transactions() {
           </button>
           
           {!batchLabelMode && (
-            <button 
-              className="label-button"
-              onClick={() => setBatchLabelMode(true)}
-            >
-              Label
-            </button>
+            <>
+              <button 
+                className="label-button"
+                onClick={() => setBatchLabelMode(true)}
+              >
+                Label
+              </button>
+              <button 
+                className="filter-button"
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              >
+                {showAdvancedFilters ? 'Hide Filters' : 'Advanced Filters'}
+              </button>
+            </>
           )}
         </div>
       </div>
+      
+      {showAdvancedFilters && (
+        <FilterBuilder 
+          fields={transactionFields}
+          onApplyFilter={handleApplyFilter}
+          initialRequest={filterRequest}
+        />
+      )}
       
       {batchLabelMode && (
         <div className="batch-label-controls">

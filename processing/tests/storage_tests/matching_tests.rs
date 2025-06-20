@@ -2,14 +2,19 @@ use processing::{
     model::MatchingField,
     storage::CommonStorage,
 };
+use common::test_helpers::truncate_processing_tables;
 use std::error::Error;
+use serial_test::serial;
 
 use super::setup::get_test_storage;
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[tokio::test]
+#[serial]
 async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
+    
+    // Clean up any existing test data
+    truncate_processing_tables(&pool).await?;
     
     // Create transactions to test with
     let transaction_id1 = storage.insert_transaction().await?;
@@ -142,8 +147,8 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     .await?;
     
     assert_eq!(connected_transactions.len(), 2, "Expected both transactions to be connected to the common node");
-    assert_eq!(connected_transactions[0].transaction_id, transaction_id1);
-    assert_eq!(connected_transactions[1].transaction_id, transaction_id2);
+    assert_eq!(connected_transactions[0].transaction_id, transaction_id1 as i64);
+    assert_eq!(connected_transactions[1].transaction_id, transaction_id2 as i64);
     
     // Test idempotency - saving the same fields again should not create duplicates
     storage.save_matching_fields(transaction_id1, &matching_fields1).await?;
@@ -175,10 +180,13 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[tokio::test]
+#[serial]
 async fn test_save_matching_fields_empty() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
+    
+    // Clean up any existing test data
+    truncate_processing_tables(&pool).await?;
     
     // Create a transaction
     let transaction_id = storage.insert_transaction().await?;

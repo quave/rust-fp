@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::sync::Arc;
-use std::time::Duration;
 
 use processing::{
     executable_utils::initialize_executable,
@@ -18,6 +17,7 @@ use ecom::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    println!("Starting processor...");
     let config = initialize_executable()?;
     
     // Create matcher configs from processor config if available
@@ -40,25 +40,20 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let model_storage = Arc::new(EcomOrderStorage::new(&config.common.database_url).await?);
     
     // Create queue
-    let queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
-    
+    let proc_queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
+    let recalc_queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
     // Create processor
     let processor = Processor::<Order, ExpressionBasedScorer>::new(
+        config.processor,
         get_expression_based_scorer(),
         common_storage,
         model_storage,
-        queue,
+        proc_queue,
+        recalc_queue,
     );
     
     // Run processor
-    loop {
-        match processor.process().await {
-            Ok(Some(_)) => continue,
-            Ok(None) => tokio::time::sleep(Duration::from_millis(config.processor.sleep_ms)).await,
-            Err(e) => {
-                eprintln!("Error processing: {}", e);
-                tokio::time::sleep(Duration::from_millis(config.processor.sleep_ms)).await;
-            }
-        }
-    }
+    processor.start_processing_worker().await?;
+
+    Ok(())
 }

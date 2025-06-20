@@ -1,25 +1,25 @@
 use serde::Deserialize;
 use std::{error::Error, fs};
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct CommonConfig {
     pub project_name: String,
     pub database_url: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct ImporterConfig {
     pub server_address: String,
     pub log_level: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct BackendConfig {
     pub server_address: String,
     pub log_level: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct ProcessorConfig {
     pub threads: u32,
     pub sleep_ms: u64,
@@ -28,7 +28,7 @@ pub struct ProcessorConfig {
     pub matcher_configs: Option<std::collections::HashMap<String, (i32, i32)>>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct Config {
     pub common: CommonConfig,
     pub importer: ImporterConfig,

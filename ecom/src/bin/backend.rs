@@ -10,6 +10,7 @@ use ecom::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    println!("Starting backend...");
     let config = initialize_executable()?;
     
     // Create storage

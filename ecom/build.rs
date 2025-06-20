@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let total_config_file_name = total_config_dir.join("total_config.yaml");
     let source_config_dir = target_dir.join(&format!("../../{}/config/", project_name));
 
-    println!("cargo:warning=Loading config");
+    println!("cargo:warning=Loading config env {:?} profile {:?}", env, std::env::var("PROFILE"));
     let path = source_config_dir.join(&format!("{}.yaml", env));
     let config_yaml = load_yaml_with_includes(&path)?;
 

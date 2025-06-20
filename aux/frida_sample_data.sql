@@ -1,4 +1,3 @@
--- Active: 1744113963389@@127.0.0.1@5432@frida_test
 -- SQL for populating the Frida AI database with test transactions
 -- Sample data for Frida AI fraud detection system
 -- This script populates the database with sample transactions for UI testing
@@ -11,19 +10,22 @@ BEGIN
   
   -- Clear existing data in reverse dependency order
   TRUNCATE order_items, customers, billing_data, orders, transactions, labels CASCADE;
+  ALTER SEQUENCE labels_id_seq RESTART WITH 1;
+  ALTER SEQUENCE transactions_id_seq RESTART WITH 1;
+  ALTER SEQUENCE orders_id_seq RESTART WITH 1;
   
   -- Re-enable foreign key checks
   SET CONSTRAINTS ALL IMMEDIATE;
 END$$;
 
 -- First, let's add some sample fraud labels
-INSERT INTO labels (id, fraud_level, fraud_category, label_source, labeled_by, created_at)
+INSERT INTO labels (fraud_level, fraud_category, label_source, labeled_by, created_at)
 VALUES 
-  (1, 'Fraud', 'Payment Fraud', 'Manual', 'Admin', NOW() - INTERVAL '10 days'),
-  (2, 'NoFraud', 'Legitimate Transaction', 'Manual', 'Admin', NOW() - INTERVAL '9 days'),
-  (3, 'BlockedAutomatically', 'Identity Theft', 'Api', 'System', NOW() - INTERVAL '8 days'),
-  (4, 'AccountTakeover', 'Account Takeover', 'Manual', 'Analyst', NOW() - INTERVAL '7 days'),
-  (5, 'NotCreditWorthy', 'Chargeback', 'Manual', 'Compliance', NOW() - INTERVAL '6 days');
+  ('Fraud', 'Payment Fraud', 'Manual', 'Admin', NOW() - INTERVAL '10 days'),
+  ('NoFraud', 'Legitimate Transaction', 'Manual', 'Admin', NOW() - INTERVAL '9 days'),
+  ('BlockedAutomatically', 'Identity Theft', 'Api', 'System', NOW() - INTERVAL '8 days'),
+  ('AccountTakeover', 'Account Takeover', 'Manual', 'Analyst', NOW() - INTERVAL '7 days'),
+  ('NotCreditWorthy', 'Chargeback', 'Manual', 'Compliance', NOW() - INTERVAL '6 days');
 
 -- Let's now insert the base transactions with proper label IDs
 INSERT INTO transactions (label_id, comment, processing_complete, created_at)

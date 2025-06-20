@@ -1,7 +1,7 @@
 // Test modules
 pub mod scorers;
+pub mod processor_tests;
 
-// Register our scorers tests in a mod file
+// Register our specific test modules
 pub mod storage_tests;
-pub mod test_utils;
 pub mod api_tests; 

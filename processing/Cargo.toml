@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-common = { path = "../common" }
+common = { path = "../common", features = ["test-helpers"] }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
@@ -41,6 +41,7 @@ evalexpr.workspace = true
 proc-macros = { path = "../proc-macros" }
 
 [dev-dependencies]
+common = { path = "../common", features = ["async-sqlx", "processing-mocks"] }
 serial_test = "3.2.0"
 http-body-util = "0.1.0"
 

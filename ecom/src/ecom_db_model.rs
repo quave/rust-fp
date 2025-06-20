@@ -128,10 +128,8 @@ impl ModelRegistryProvider for Order {
 
 #[async_trait]
 impl Processible for Order {
-    fn extract_features(
+    fn extract_simple_features(
         &self,
-        connected_transactions: &[ConnectedTransaction],
-        direct_connections: &[DirectConnection]
     ) -> Vec<Feature> {
         let mut features = Vec::new();
 
@@ -167,7 +165,16 @@ impl Processible for Order {
                 self.items.iter().map(|i| i.price as f64).sum::<f64>() > 1000.0,
             )),
         });
-        
+
+        features
+    }
+
+    fn extract_graph_features(
+        &self,
+        connected_transactions: &[ConnectedTransaction],
+        direct_connections: &[DirectConnection]
+    ) -> Vec<Feature> {
+        let mut features = Vec::new();
         // Add connection-related features
         features.push(Feature {
             name: "connected_transaction_count".to_string(),

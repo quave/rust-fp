@@ -31,7 +31,7 @@ fn process_includes_recursive(path: &PathBuf) -> Result<Yaml, Box<dyn Error>> {
 
     let merged_rest = rest_yamls
         .into_iter()
-        .reduce(|acc: Yaml, include: Yaml| merge_yaml(&acc, &include))
+        .reduce(|acc: Yaml, include: Yaml| merge_yaml(&include, &acc))
         .ok_or("Failed to reduce includes")?;
 
     match processed_includes.reduce(|acc: Yaml, include: Yaml| merge_yaml(&acc, &include)) {

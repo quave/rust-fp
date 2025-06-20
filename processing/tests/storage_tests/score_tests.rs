@@ -4,14 +4,19 @@ use processing::{
     model::{ScorerResult, TriggeredRule},
     storage::CommonStorage,
 };
+use common::test_helpers::truncate_processing_tables;
 use serde_json::json;
 
 use super::setup::get_test_storage;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_save_scores() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
+    
+    // Clean up any existing test data
+    truncate_processing_tables(&pool).await?;
+    
     let transaction_id = storage.insert_transaction().await?;
     
     // First create a model
@@ -117,7 +122,7 @@ async fn test_save_scores() -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_save_scores_with_empty_list() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
@@ -181,10 +186,14 @@ async fn test_save_scores_with_empty_list() -> Result<(), Box<dyn Error + Send +
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_save_scores_with_duplicate_names() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
+    
+    // Clean up any existing test data
+    truncate_processing_tables(&pool).await?;
+    
     let transaction_id = storage.insert_transaction().await?;
     
     // First create a model

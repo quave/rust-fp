@@ -66,8 +66,6 @@ impl ProdCommonStorage {
     pub fn validate_features(&self, features: &[Feature]) -> Result<(), Box<dyn Error + Send + Sync>> {
         let features_json = serde_json::to_value(features)?;
         debug!("Raw features JSON string: {}", serde_json::to_string(&features_json)?);
-        debug!("Features JSON before validation: {}", serde_json::to_string_pretty(&features_json)?);
-        debug!("Schema before validation: {}", serde_json::to_string_pretty(&self.get_features_schema())?);
         let validation_result = validate(&self.get_features_schema(), &features_json);
         if let Err(errors) = validation_result {
             debug!("Validation error details: {:?}", errors);
@@ -219,29 +217,61 @@ impl CommonStorage for ProdCommonStorage {
     async fn save_features(
         &self,
         transaction_id: ModelId,
-        features: &[Feature],
+        simple_features: Option<&[Feature]>,
+        graph_features: &[Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Validate features against schema if one is provided
-        self.validate_features(features)?;
+
+        self.validate_features(graph_features)?;
 
         let mut tx = self.pool.begin().await?;
+        let graph_json_value = serde_json::to_value(graph_features)?;
 
-        // Convert features to JSON Value
-        let json_value = serde_json::to_value(features)?;
+        match simple_features {
+            Some(features) => {
+                self.validate_features(features)?;
+                
+                let simple_json_value = serde_json::to_value(simple_features)?;
 
-        sqlx::query!(
-            r#"
-            INSERT INTO features (
-                transaction_id, schema_version_major, schema_version_minor, payload
-            ) VALUES ($1, $2, $3, $4)
-            "#,
-            transaction_id,
-            1,
-            0,
-            json_value
-        )
-        .execute(&mut *tx)
-        .await?;
+                sqlx::query!(
+                    r#"
+                    INSERT INTO features (
+                        transaction_id,
+                        transaction_version,
+                        schema_version_major,
+                        schema_version_minor,
+                        simple_features,
+                        graph_features
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (transaction_id, transaction_version) DO UPDATE SET
+                        schema_version_major = $3, schema_version_minor = $4, simple_features = $5, graph_features = $6;
+                    "#,
+                    transaction_id,
+                    1,
+                    1,
+                    0,
+                    simple_json_value,
+                    graph_json_value
+                )
+                .execute(&mut *tx)
+                .await
+            },
+            None => {
+                sqlx::query!(
+                    r#"
+                    UPDATE features
+                    SET schema_version_major = $2, schema_version_minor = $3, graph_features = $4
+                    WHERE transaction_id = $1
+                    "#,
+                    transaction_id,
+                    1,
+                    0,
+                    graph_json_value
+                )
+                .execute(&mut *tx)
+                .await
+            },
+        }?;
 
         tx.commit().await?;
         Ok(())
@@ -250,10 +280,16 @@ impl CommonStorage for ProdCommonStorage {
     async fn get_features(
         &self,
         transaction_id: ModelId,
-    ) -> Result<Vec<Feature>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<(Option<Vec<Feature>>, Vec<Feature>), Box<dyn Error + Send + Sync>> {
         let row = sqlx::query!(
             r#"
-            SELECT id, transaction_id, schema_version_major, schema_version_minor, payload
+            SELECT 
+                id, 
+                transaction_id,
+                schema_version_major,
+                schema_version_minor,
+                simple_features,
+                graph_features
             FROM features
             WHERE transaction_id = $1
             ORDER BY created_at DESC
@@ -264,12 +300,21 @@ impl CommonStorage for ProdCommonStorage {
         .fetch_one(&self.pool)
         .await?;
 
-        let features: Vec<Feature> = serde_json::from_value(row.payload)?;
+        let simple_features: Option<Vec<Feature>> = match row.simple_features {
+            Some(json_value) => {
+                let features: Vec<Feature> = serde_json::from_value(json_value)?;
+                self.validate_features(&features)?;
+                Some(features)
+            },
+            None => None,
+        };
+
+        let graph_features: Vec<Feature> = serde_json::from_value(row.graph_features)?;
         
         // Validate features against schema if one is provided
-        self.validate_features(&features)?;
+        self.validate_features(&graph_features)?;
         
-        Ok(features)
+        Ok((simple_features, graph_features))
     }
 
     async fn find_connected_transactions(

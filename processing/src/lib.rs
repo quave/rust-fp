@@ -5,5 +5,4 @@ pub mod processor;
 pub mod queue;
 pub mod scorers;
 pub mod storage;
-pub mod test_helpers;
 pub mod ui_model;

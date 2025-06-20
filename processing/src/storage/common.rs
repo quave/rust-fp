@@ -1,16 +1,18 @@
 use crate::model::{
-    Channel, ConnectedTransaction, DirectConnection, Feature, Label, MatchingField, ModelId, ScoringEvent,
+    Channel, ConnectedTransaction, DirectConnection, Feature, FraudLevel, Label, LabelingResult, LabelSource, MatchingField, ModelId, ScoringEvent,
     TriggeredRule,
 };
 use async_trait::async_trait;
 use std::error::Error;
+use chrono::Utc;
 
 #[async_trait]
 pub trait CommonStorage: Send + Sync {
     async fn save_features(
         &self,
         transaction_id: ModelId,
-        features: &[Feature],
+        simple_features: Option<&[Feature]>,
+        graph_features: &[Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     async fn save_scores(
@@ -24,7 +26,7 @@ pub trait CommonStorage: Send + Sync {
     async fn get_features(
         &self,
         transaction_id: ModelId,
-    ) -> Result<Vec<Feature>, Box<dyn Error + Send + Sync>>;
+    ) -> Result<(Option<Vec<Feature>>, Vec<Feature>), Box<dyn Error + Send + Sync>>;
     
     async fn find_connected_transactions(
         &self,
@@ -77,4 +79,54 @@ pub trait CommonStorage: Send + Sync {
         transaction_id: ModelId,
         label_id: ModelId,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
+    
+    /// Label multiple transactions with the same label in a batch operation
+    async fn label_transactions(
+        &self,
+        transaction_ids: &[ModelId],
+        fraud_level: FraudLevel,
+        fraud_category: String,
+        labeled_by: String,
+    ) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
+        // Create label object
+        let label = Label {
+            id: 0, // Will be filled by the database
+            fraud_level,
+            fraud_category,
+            label_source: LabelSource::Manual,
+            labeled_by,
+            created_at: Utc::now(),
+        };
+        
+        // Save the label and get its ID
+        let label_id = self.save_label(&label).await?;
+        
+        let mut success_count = 0;
+        let mut failed_transaction_ids = Vec::new();
+        
+        // Apply the label to each transaction ID in the batch
+        for &transaction_id in transaction_ids {
+            match self.update_transaction_label(transaction_id, label_id).await {
+                Ok(_) => {
+                    success_count += 1;
+                    tracing::info!("Successfully labeled transaction {}: label_id={}", transaction_id, label_id);
+                },
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        transaction_id = %transaction_id,
+                        label_id = %label_id,
+                        "Failed to update transaction with label"
+                    );
+                    failed_transaction_ids.push(transaction_id);
+                }
+            }
+        }
+        
+        Ok(LabelingResult {
+            label_id,
+            success_count,
+            failed_transaction_ids,
+        })
+    }
 } 

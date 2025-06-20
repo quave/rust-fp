@@ -256,4 +256,61 @@ input[type="checkbox"] {
 .table-container table td:first-child {
   width: 40px;
   text-align: center;
+}
+
+.filter-button {
+  background-color: #334155;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+  font-weight: 500;
+}
+
+.filter-button:hover {
+  background-color: #475569;
+}
+
+/* Styling for active advanced filters */
+.MuiChip-root {
+  margin: 4px;
+}
+
+.MuiPaper-root {
+  background-color: #1e293b;
+  color: white;
+}
+
+.MuiInputBase-root {
+  color: white;
+}
+
+.MuiInputLabel-root {
+  color: #94a3b8;
+}
+
+.MuiOutlinedInput-notchedOutline {
+  border-color: #475569;
+}
+
+.MuiSelect-select {
+  color: white;
+}
+
+/* Card styling */
+.MuiCard-root {
+  background-color: #1e293b;
+}
+
+/* Override MUI input fields */
+.MuiFormControl-root .MuiInputBase-root {
+  border-radius: 4px;
+  background-color: #111827;
+}
+
+/* Override MUI buttons */
+.MuiButton-root {
+  text-transform: none;
 } 

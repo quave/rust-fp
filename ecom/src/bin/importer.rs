@@ -13,6 +13,7 @@ use ecom::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    println!("Starting importer...");
     let config = initialize_executable()?;
     
     // Create storage

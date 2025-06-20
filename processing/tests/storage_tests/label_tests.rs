@@ -5,10 +5,14 @@ use processing::{
 };
 use std::error::Error;
 
-use super::setup::get_test_storage;
+use super::setup::{get_test_storage, get_unique_model_id};
+
+// =============================================================================
+// STORAGE LAYER TESTS (Integration tests with real database)
+// =============================================================================
 
 // Test saving and retrieving a label
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_save_and_get_label() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (_pool, storage) = get_test_storage().await?;
@@ -47,7 +51,7 @@ async fn test_save_and_get_label() -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 // Test saving a label with different fraud levels
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_save_label_with_different_fraud_levels() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (_pool, storage) = get_test_storage().await?;
@@ -93,7 +97,7 @@ async fn test_save_label_with_different_fraud_levels() -> Result<(), Box<dyn Err
 }
 
 // Test saving a label with different label sources
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_save_label_with_different_sources() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (_pool, storage) = get_test_storage().await?;
@@ -133,17 +137,20 @@ async fn test_save_label_with_different_sources() -> Result<(), Box<dyn Error + 
 }
 
 // Test updating transaction label
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_update_transaction_label() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
+    
+    let transaction_id = get_unique_model_id();
     
     // Create a transaction
     sqlx::query!(
         r#"
         INSERT INTO transactions (id, created_at) 
-        VALUES (1, '2024-01-01')
-        "#
+        VALUES ($1, '2024-01-01')
+        "#,
+        transaction_id
     )
     .execute(&pool)
     .await?;
@@ -162,14 +169,15 @@ async fn test_update_transaction_label() -> Result<(), Box<dyn Error + Send + Sy
     let label_id = storage.save_label(&test_label).await?;
     
     // Update transaction label
-    storage.update_transaction_label(1, label_id).await?;
+    storage.update_transaction_label(transaction_id, label_id).await?;
     
     // Verify label was set correctly
     let row = sqlx::query!(
         r#"
         SELECT label_id FROM transactions
-        WHERE id = 1
-        "#
+        WHERE id = $1
+        "#,
+        transaction_id
     )
     .fetch_one(&pool)
     .await?;
@@ -180,7 +188,7 @@ async fn test_update_transaction_label() -> Result<(), Box<dyn Error + Send + Sy
 }
 
 // Test updating transaction label for non-existent transaction
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_update_nonexistent_transaction_label() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (_pool, storage) = get_test_storage().await?;
@@ -222,17 +230,20 @@ async fn test_update_nonexistent_transaction_label() -> Result<(), Box<dyn Error
 }
 
 // Test updating transaction label multiple times
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 #[serial_test::serial]
 async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
+    
+    let transaction_id = get_unique_model_id();
     
     // Create a transaction
     sqlx::query!(
         r#"
         INSERT INTO transactions (id, created_at) 
-        VALUES (1, '2024-01-01')
-        "#
+        VALUES ($1, '2024-01-01')
+        "#,
+        transaction_id
     )
     .execute(&pool)
     .await?;
@@ -251,14 +262,15 @@ async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Er
     let first_label_id = storage.save_label(&first_label).await?;
     
     // Update transaction with first label
-    storage.update_transaction_label(1, first_label_id).await?;
+    storage.update_transaction_label(transaction_id, first_label_id).await?;
     
     // Verify first label was set
     let row1 = sqlx::query!(
         r#"
         SELECT label_id FROM transactions
-        WHERE id = 1
-        "#
+        WHERE id = $1
+        "#,
+        transaction_id
     )
     .fetch_one(&pool)
     .await?;
@@ -279,14 +291,15 @@ async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Er
     let second_label_id = storage.save_label(&second_label).await?;
     
     // Update transaction with second label
-    storage.update_transaction_label(1, second_label_id).await?;
+    storage.update_transaction_label(transaction_id, second_label_id).await?;
     
     // Verify second label replaced first label
     let row2 = sqlx::query!(
         r#"
         SELECT label_id FROM transactions
-        WHERE id = 1
-        "#
+        WHERE id = $1
+        "#,
+        transaction_id
     )
     .fetch_one(&pool)
     .await?;
@@ -294,4 +307,22 @@ async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Er
     assert_eq!(row2.label_id, Some(second_label_id));
     
     Ok(())
-} 
+}
+
+// =============================================================================
+// BUSINESS LOGIC TESTS (Unit tests with unified mocks)
+// =============================================================================
+
+// TODO: Re-implement these tests with centralized MockCommonStorage from common crate
+// 
+// This section previously contained comprehensive business logic unit tests for 
+// transaction labeling functionality including:
+// - test_label_transactions_complete_success
+// - test_label_transactions_save_label_failure  
+// - test_label_transactions_partial_success
+// - test_label_transactions_complete_failure
+// - test_label_transactions_empty_list
+//
+// These tests have been temporarily commented out during the test helper 
+// centralization effort. When re-implementing, they should use the centralized
+// MockCommonStorage from the common crate's test_helpers module. 

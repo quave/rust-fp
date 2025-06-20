@@ -12,11 +12,16 @@ pub type ModelId = i64;
 pub trait Processible: Send + Sync {
     fn id(&self) -> ModelId;
     fn tx_id(&self) -> ModelId;
-    fn extract_features(
+    fn extract_simple_features(
+        &self
+    ) -> Vec<Feature>;
+    
+    fn extract_graph_features(
         &self,
         connected_transactions: &[ConnectedTransaction],
         direct_connections: &[DirectConnection]
     ) -> Vec<Feature>;
+
     fn extract_matching_fields(&self) -> Vec<MatchingField>;
 }
 
@@ -56,7 +61,7 @@ pub enum FraudLevel {
     NotCreditWorthy
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum LabelSource {
     Manual,
     Api
@@ -386,4 +391,25 @@ pub struct DirectConnection {
     pub importance: i32,
     #[serde(with = "ts_seconds")]
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelingResult {
+    pub label_id: ModelId,
+    pub success_count: usize,
+    pub failed_transaction_ids: Vec<ModelId>,
+}
+
+impl LabelingResult {
+    pub fn is_complete_success(&self) -> bool {
+        self.failed_transaction_ids.is_empty()
+    }
+    
+    pub fn is_partial_success(&self) -> bool {
+        self.success_count > 0 && !self.failed_transaction_ids.is_empty()
+    }
+    
+    pub fn is_complete_failure(&self) -> bool {
+        self.success_count == 0 && !self.failed_transaction_ids.is_empty()
+    }
 }

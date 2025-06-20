@@ -15,11 +15,11 @@ use http::header;
 use common::config::{Config, ImporterConfig, BackendConfig};
 use crate::{
     importer::Importer,
-    model::{FraudLevel, Importable, ImportableSerde, Label, LabelSource, ModelId, ModelRegistryProvider, WebTransaction},
+    model::{FraudLevel, Importable, ImportableSerde, ModelId, ModelRegistryProvider, WebTransaction},
     queue::QueueService,
     storage::{CommonStorage, ImportableStorage, WebStorage}, ui_model::FilterRequest,
 };
-use chrono::Utc;
+use serde_json::to_string_pretty;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -31,7 +31,7 @@ pub struct Args {
 
 pub fn initialize_executable() -> Result<Config, Box<dyn Error + Send + Sync>> {
     // Add this at the very start, before any other code
-    println!("Starting importer with env:");
+    println!("Starting with env:");
     for (key, value) in std::env::vars() {
         println!("{key}={value}");
     }
@@ -53,7 +53,7 @@ pub fn initialize_executable() -> Result<Config, Box<dyn Error + Send + Sync>> {
         .init();
 
     // At the start of main:
-    println!("Starting importer...");
+    println!("Starting...");
     println!("Working directory: {:?}", std::env::current_dir()?);
     println!(
         "Config directory: {:?}",
@@ -102,13 +102,18 @@ pub async fn import_transaction<I>(
 where
     I: Importable + Clone,
 {
-    match importer.import(transaction).await {
+    match importer.import(transaction.clone()).await {
         Ok(id) => {
             tracing::info!("Successfully imported transaction with ID: {:?}", id);
             (StatusCode::OK, Json(id)).into_response()
         }
         Err(e) => {
-            tracing::error!("Failed to import transaction: {}", e);
+            // Enhanced error logging with transaction information
+            tracing::error!(
+                error = %e,
+                transaction_type = std::any::type_name::<I>(),
+                "Failed to import transaction"
+            );
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
@@ -133,6 +138,7 @@ where
     
     let app = Router::new()
         .route("/api/transactions", get(list_transactions::<T>))
+        .route("/api/transactions/filter", post(filter_transactions::<T>))
         .route("/api/transactions/label", post(label_transaction::<T>))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
@@ -158,6 +164,18 @@ pub struct AppState<T: WebTransaction + ModelRegistryProvider + Send + Sync + 's
     common_storage: Arc<dyn CommonStorage>,
 }
 
+impl<T: WebTransaction + ModelRegistryProvider + Send + Sync + 'static> AppState<T> {
+    pub fn new(
+        web_storage: Arc<dyn WebStorage<T>>,
+        common_storage: Arc<dyn CommonStorage>,
+    ) -> Self {
+        Self {
+            web_storage,
+            common_storage,
+        }
+    }
+}
+
 pub async fn list_transactions<T: ModelRegistryProvider>(
     axum::extract::State(state): axum::extract::State<AppState<T>>,
 ) -> impl IntoResponse
@@ -166,11 +184,16 @@ where
 {
     match state.web_storage.get_transactions(FilterRequest::default()).await {
         Ok(transactions) => {
-            tracing::trace!("Loaded list of transaction");
+            tracing::info!("Loaded list of {} transactions", transactions.len());
             (StatusCode::OK, Json(transactions)).into_response()
         }
         Err(e) => {
-            tracing::error!("Failed to import transaction: {}", e);
+            // Enhanced error logging for list transactions
+            tracing::error!(
+                error = %e,
+                endpoint = "list_transactions",
+                "Failed to load transactions"
+            );
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
@@ -187,58 +210,108 @@ pub struct LabelRequest {
 
 pub async fn label_transaction<T: ModelRegistryProvider>(
     axum::extract::State(state): axum::extract::State<AppState<T>>,
-    Json(label_req): Json<LabelRequest>,
+    Json(label_request): Json<LabelRequest>,
 ) -> impl IntoResponse 
 where
     T: WebTransaction + Send + Sync,
 {
-    // Create label object
-    let label = Label {
-        id: 0, // Will be filled by the database
-        fraud_level: label_req.fraud_level,
-        fraud_category: label_req.fraud_category,
-        label_source: LabelSource::Manual, // Always Manual when coming from the backend
-        labeled_by: label_req.labeled_by,
-        created_at: Utc::now(),
-    };
+    // Log the incoming request
+    tracing::info!(
+        transaction_ids = ?label_request.transaction_ids, 
+        "Processing label request for {} transactions", 
+        label_request.transaction_ids.len()
+    );
     
-    // Save the label and get its ID
-    let save_result = state.common_storage.save_label(&label).await;
-    
-    match save_result {
-        Ok(label_id) => {
-            let mut success_count = 0;
-            let mut failed_ids = Vec::new();
-            
-            // Apply the label to each transaction ID in the batch
-            for transaction_id in &label_req.transaction_ids {
-                match state.common_storage.update_transaction_label(*transaction_id, label_id).await {
-                    Ok(_) => {
-                        success_count += 1;
-                        tracing::info!("Successfully labeled transaction {}: label_id={}", transaction_id, label_id);
-                    },
-                    Err(e) => {
-                        tracing::error!("Failed to update transaction {} with label: {}", transaction_id, e);
-                        failed_ids.push(*transaction_id);
-                    }
-                }
-            }
-            
-            if failed_ids.is_empty() {
-                (StatusCode::OK, Json(label_id)).into_response()
-            } else {
+    // Use the new business logic method
+    match state.common_storage.label_transactions(
+        &label_request.transaction_ids,
+        label_request.fraud_level,
+        label_request.fraud_category,
+        label_request.labeled_by,
+    ).await {
+        Ok(result) => {
+            if result.is_complete_success() {
+                tracing::info!("Successfully labeled all {} transactions", result.success_count);
+                (StatusCode::OK, Json(result.label_id)).into_response()
+            } else if result.is_partial_success() {
                 let message = format!(
                     "Partially successful: labeled {}/{} transactions. Failed IDs: {:?}",
-                    success_count, 
-                    label_req.transaction_ids.len(), 
-                    failed_ids
+                    result.success_count, 
+                    label_request.transaction_ids.len(), 
+                    result.failed_transaction_ids
+                );
+                tracing::warn!(
+                    success_count = %result.success_count,
+                    total_count = %label_request.transaction_ids.len(),
+                    failed_ids = ?result.failed_transaction_ids,
+                    "Partially successful labeling request"
                 );
                 (StatusCode::PARTIAL_CONTENT, message).into_response()
+            } else {
+                // Complete failure
+                let message = format!("Failed to label any transactions. Failed IDs: {:?}", result.failed_transaction_ids);
+                tracing::error!(
+                    total_count = %label_request.transaction_ids.len(),
+                    failed_ids = ?result.failed_transaction_ids,
+                    "Complete failure in labeling request"
+                );
+                (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
             }
         }
         Err(e) => {
-            tracing::error!("Failed to save label: {}", e);
+            tracing::error!(
+                error = %e,
+                transaction_count = %label_request.transaction_ids.len(),
+                "Failed to execute labeling operation"
+            );
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+pub async fn filter_transactions<T: ModelRegistryProvider>(
+    axum::extract::State(state): axum::extract::State<AppState<T>>,
+    Json(filter_request): Json<FilterRequest>,
+) -> impl IntoResponse
+where
+    T: WebTransaction + Send + Sync,
+{
+    // Log the incoming filter request with details
+    let filter_json = match to_string_pretty(&filter_request) {
+        Ok(json) => json,
+        Err(_) => format!("{:?}", filter_request),
+    };
+    
+    tracing::info!(
+        method = "filter_transactions",
+        filter_request = %filter_json,
+        "Processing filter request"
+    );
+    
+    match state.web_storage.get_transactions(filter_request).await {
+        Ok(transactions) => {
+            tracing::info!("Successfully filtered transactions, returning {} results", transactions.len());
+            (StatusCode::OK, Json(transactions)).into_response()
+        }
+        Err(e) => {
+            // Enhanced detailed error logging for filter failures
+            let error_message = e.to_string();
+            tracing::error!(
+                error = %error_message,
+                filter_request = %filter_json,
+                "Failed to filter transactions"
+            );
+            
+            // Parse the error message to provide more context if possible
+            if error_message.contains("Error processing condition column") || 
+               error_message.contains("Relation") || 
+               error_message.contains("not found on model") {
+                tracing::error!(
+                    "This appears to be a relation mapping error. Please check field names and model relations."
+                );
+            }
+            
+            (StatusCode::INTERNAL_SERVER_ERROR, error_message).into_response()
         }
     }
 }

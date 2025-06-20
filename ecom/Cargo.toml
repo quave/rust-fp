@@ -7,7 +7,7 @@ build = "build.rs"
 
 [dependencies]
 processing = { path = "../processing" }
-common = { path = "../common" }
+common = { path = "../common", features = ["test-helpers"] }
 proc-macros = { path = "../proc-macros" }
 async-trait = { workspace = true }
 chrono = { workspace = true }
@@ -39,6 +39,9 @@ axum = { workspace = true }
 tower-http = { workspace = true }
 tower = { workspace = true }
 actix-web.workspace = true
+
+[dev-dependencies]
+common = { path = "../common", features = ["async-sqlx"] }
 
 [build-dependencies]
 fs_extra = "1.3"

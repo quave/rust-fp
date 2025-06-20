@@ -1,12 +1,13 @@
+use processing::storage::CommonStorage;
 use std::error::Error;
 use tracing::debug;
 
-use processing::storage::CommonStorage;
+use super::setup::*;
+use common::test_helpers::truncate_processing_tables;
+use serial_test::serial;
 
-use super::setup::get_test_storage;
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[tokio::test]
+#[serial]
 async fn test_transaction_matching_sql_function() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, _) = get_test_storage().await?;
     
@@ -61,13 +62,15 @@ async fn test_transaction_matching_sql_function() -> Result<(), Box<dyn Error + 
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[tokio::test]
+#[serial]
 async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
     
-    // SECTION 1: Basic connectivity test
-    // Set up initial test transactions
+    // Clean up any existing test data
+    truncate_processing_tables(&pool).await?;
+    
+    // Create transactions to test with
     sqlx::query!(
         r#"
         INSERT INTO transactions (id, created_at) VALUES 
@@ -242,12 +245,15 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
+#[tokio::test]
+#[serial]
 async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
-
-    // Create three transactions
+    
+    // Clean up any existing test data
+    truncate_processing_tables(&pool).await?;
+    
+    // Create transactions
     let tx1 = storage.insert_transaction().await?;
     let tx2 = storage.insert_transaction().await?;
     let tx3 = storage.insert_transaction().await?;

@@ -106,12 +106,15 @@ CREATE INDEX IF NOT EXISTS idx_triggered_rules_rule_id ON triggered_rules(rule_i
 CREATE TABLE IF NOT EXISTS features (
     id BIGSERIAL PRIMARY KEY,
     transaction_id BIGINT NOT NULL,
+    transaction_version INT NOT NULL,
     schema_version_major INTEGER NOT NULL,
     schema_version_minor INTEGER NOT NULL,
-    payload JSONB NOT NULL,
+    simple_features JSONB,
+    graph_features JSONB NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_features_transaction_id_version ON features(transaction_id, transaction_version);
 CREATE INDEX IF NOT EXISTS idx_features_transaction_id ON features(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_features_created_at ON features(created_at);
 CREATE INDEX IF NOT EXISTS idx_features_schema_version_major_minor ON features(schema_version_major, schema_version_minor);
@@ -124,3 +127,12 @@ CREATE TABLE IF NOT EXISTS processing_queue (
 );
 CREATE INDEX IF NOT EXISTS idx_processing_queue_processable_id ON processing_queue(processable_id);
 CREATE INDEX IF NOT EXISTS idx_processing_queue_created_at ON processing_queue(created_at);
+
+CREATE TABLE IF NOT EXISTS recalculation_queue (
+    id BIGSERIAL PRIMARY KEY,
+    processable_id BIGINT NOT NULL,
+    processed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_recalculation_queue_processable_id ON recalculation_queue(processable_id);
+CREATE INDEX IF NOT EXISTS idx_recalculation_queue_created_at ON recalculation_queue(created_at);

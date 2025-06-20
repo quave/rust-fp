@@ -4,14 +4,31 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+test-helpers = ["async-sqlx"]
+async-sqlx = ["dep:sqlx"]
+processing-mocks = ["async-sqlx"]
+
 [dependencies]
 serde = { workspace = true }
-serde_yaml = { workspace = true }
-yaml-rust2 = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+once_cell = { workspace = true }
 thiserror = { workspace = true }
-async-trait = { workspace = true }
+http = { workspace = true }
+reqwest = { workspace = true }
+
+# Optional dependencies for test helpers
+sqlx = { workspace = true, optional = true }
 
 [lib]
 name = "common"
 path = "src/lib.rs"
+
+[dev-dependencies]
+tokio-test = "0.4.4"
 
