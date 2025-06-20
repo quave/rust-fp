@@ -37,9 +37,12 @@ tower = { workspace = true }
 clap = { version = "4.4", features = ["derive"] }
 jsonschema = "0.29.1"
 http.workspace = true
+evalexpr.workspace = true
+proc-macros = { path = "../proc-macros" }
 
 [dev-dependencies]
 serial_test = "3.2.0"
+http-body-util = "0.1.0"
 
 [lib]
 name = "processing"

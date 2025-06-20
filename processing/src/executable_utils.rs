@@ -15,10 +15,11 @@ use http::header;
 use common::config::{Config, ImporterConfig, BackendConfig};
 use crate::{
     importer::Importer,
-    model::{Importable, ImportableSerde, WebTransaction},
+    model::{FraudLevel, Importable, ImportableSerde, Label, LabelSource, ModelId, ModelRegistryProvider, WebTransaction},
     queue::QueueService,
-    storage::{ImportableStorage, WebStorage},
+    storage::{CommonStorage, ImportableStorage, WebStorage}, ui_model::FilterRequest,
 };
+use chrono::Utc;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -120,12 +121,19 @@ pub async fn health_check() -> impl IntoResponse {
 pub async fn run_backend<T>(
     config: BackendConfig,
     storage: Arc<dyn WebStorage<T>>,
+    common_storage: Arc<dyn CommonStorage>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-    T: WebTransaction + Clone + 'static,
+    T: WebTransaction + ModelRegistryProvider + Send + Sync + Clone + 'static,
 {
+    let state = AppState {
+        web_storage: storage,
+        common_storage,
+    };
+    
     let app = Router::new()
         .route("/api/transactions", get(list_transactions::<T>))
+        .route("/api/transactions/label", post(label_transaction::<T>))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
         .layer(
@@ -134,7 +142,7 @@ where
                 .allow_methods(Any)
                 .allow_headers(Any)
         )
-        .with_state(storage);
+        .with_state(state);
 
     tracing::info!("Starting backend service at {}", config.server_address);
     let listener = tokio::net::TcpListener::bind(&config.server_address).await?;
@@ -143,19 +151,93 @@ where
     Ok(())
 }
 
-pub async fn list_transactions<T>(
-    axum::extract::State(storage): axum::extract::State<Arc<dyn WebStorage<T>>>,
+// Move AppState outside the function so it's visible to handler functions
+#[derive(Clone)]
+pub struct AppState<T: WebTransaction + ModelRegistryProvider + Send + Sync + 'static> {
+    web_storage: Arc<dyn WebStorage<T>>,
+    common_storage: Arc<dyn CommonStorage>,
+}
+
+pub async fn list_transactions<T: ModelRegistryProvider>(
+    axum::extract::State(state): axum::extract::State<AppState<T>>,
 ) -> impl IntoResponse
 where
-    T: WebTransaction,
+    T: WebTransaction + Send + Sync,
 {
-    match storage.get_transactions().await {
+    match state.web_storage.get_transactions(FilterRequest::default()).await {
         Ok(transactions) => {
             tracing::trace!("Loaded list of transaction");
             (StatusCode::OK, Json(transactions)).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to import transaction: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
+}
+
+// Define the request structure for labeling
+#[derive(serde::Deserialize)]
+pub struct LabelRequest {
+    pub transaction_ids: Vec<ModelId>,
+    pub fraud_level: FraudLevel,
+    pub fraud_category: String,
+    pub labeled_by: String,
+}
+
+pub async fn label_transaction<T: ModelRegistryProvider>(
+    axum::extract::State(state): axum::extract::State<AppState<T>>,
+    Json(label_req): Json<LabelRequest>,
+) -> impl IntoResponse 
+where
+    T: WebTransaction + Send + Sync,
+{
+    // Create label object
+    let label = Label {
+        id: 0, // Will be filled by the database
+        fraud_level: label_req.fraud_level,
+        fraud_category: label_req.fraud_category,
+        label_source: LabelSource::Manual, // Always Manual when coming from the backend
+        labeled_by: label_req.labeled_by,
+        created_at: Utc::now(),
+    };
+    
+    // Save the label and get its ID
+    let save_result = state.common_storage.save_label(&label).await;
+    
+    match save_result {
+        Ok(label_id) => {
+            let mut success_count = 0;
+            let mut failed_ids = Vec::new();
+            
+            // Apply the label to each transaction ID in the batch
+            for transaction_id in &label_req.transaction_ids {
+                match state.common_storage.update_transaction_label(*transaction_id, label_id).await {
+                    Ok(_) => {
+                        success_count += 1;
+                        tracing::info!("Successfully labeled transaction {}: label_id={}", transaction_id, label_id);
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to update transaction {} with label: {}", transaction_id, e);
+                        failed_ids.push(*transaction_id);
+                    }
+                }
+            }
+            
+            if failed_ids.is_empty() {
+                (StatusCode::OK, Json(label_id)).into_response()
+            } else {
+                let message = format!(
+                    "Partially successful: labeled {}/{} transactions. Failed IDs: {:?}",
+                    success_count, 
+                    label_req.transaction_ids.len(), 
+                    failed_ids
+                );
+                (StatusCode::PARTIAL_CONTENT, message).into_response()
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to save label: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }

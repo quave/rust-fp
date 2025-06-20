@@ -38,6 +38,25 @@ interface Transaction {
   billing: Billing;
 }
 
+// Define fraud level enum based on backend
+enum FraudLevel {
+  Fraud = 'Fraud',
+  NoFraud = 'NoFraud',
+  BlockedAutomatically = 'BlockedAutomatically',
+  AccountTakeover = 'AccountTakeover',
+  NotCreditWorthy = 'NotCreditWorthy'
+}
+
+// Common fraud categories
+const fraudCategories = [
+  'Payment Fraud',
+  'Identity Theft',
+  'Account Takeover',
+  'Chargeback',
+  'Legitimate Transaction',
+  'Other'
+];
+
 type FilterStatus = 'all' | 'completed' | 'pending';
 
 export function Transactions() {
@@ -46,6 +65,13 @@ export function Transactions() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  
+  // Batch labeling state
+  const [batchLabelMode, setBatchLabelMode] = useState(false);
+  const [selectedTransactions, setSelectedTransactions] = useState<number[]>([]);
+  const [selectedFraudLevel, setSelectedFraudLevel] = useState<FraudLevel>(FraudLevel.NoFraud);
+  const [selectedFraudCategory, setSelectedFraudCategory] = useState<string>(fraudCategories[4]);
+  const [labelingInProgress, setLabelingInProgress] = useState(false);
 
   useEffect(() => {
     const fetchTransactions = async () => {
@@ -65,6 +91,74 @@ export function Transactions() {
 
     fetchTransactions();
   }, []);
+
+  const toggleTransactionSelection = (transactionId: number) => {
+    setSelectedTransactions(prev => {
+      if (prev.includes(transactionId)) {
+        return prev.filter(id => id !== transactionId);
+      } else {
+        return [...prev, transactionId];
+      }
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedTransactions.length === filteredTransactions.length) {
+      setSelectedTransactions([]);
+    } else {
+      setSelectedTransactions(filteredTransactions.map(t => t.order.id));
+    }
+  };
+
+  const cancelBatchLabel = () => {
+    setBatchLabelMode(false);
+    setSelectedTransactions([]);
+  };
+
+  const saveBatchLabels = async () => {
+    if (selectedTransactions.length === 0) return;
+    
+    setLabelingInProgress(true);
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/transactions/label', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          transaction_ids: selectedTransactions,
+          fraud_level: selectedFraudLevel,
+          fraud_category: selectedFraudCategory,
+          labeled_by: 'Web UI' // Could be replaced with actual user info in the future
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to label transactions');
+      }
+      
+      // Success notification could be added here
+      console.log('Successfully labeled transactions');
+      
+      // Exit batch label mode and reset selections
+      setBatchLabelMode(false);
+      setSelectedTransactions([]);
+      
+      // Refresh transaction list to show updated labels
+      // This is a simple approach - in a real app you might want to
+      // just update the local state instead of refetching
+      const refreshResponse = await fetch('http://localhost:8000/api/transactions');
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+        setTransactions(data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while labeling');
+    } finally {
+      setLabelingInProgress(false);
+    }
+  };
 
   const filteredTransactions = transactions.filter(transaction => {
     const matchesSearch = 
@@ -116,13 +210,76 @@ export function Transactions() {
           >
             Pending
           </button>
+          
+          {!batchLabelMode && (
+            <button 
+              className="label-button"
+              onClick={() => setBatchLabelMode(true)}
+            >
+              Label
+            </button>
+          )}
         </div>
       </div>
+      
+      {batchLabelMode && (
+        <div className="batch-label-controls">
+          <div className="dropdown-container">
+            <label>Fraud Level:</label>
+            <select 
+              value={selectedFraudLevel} 
+              onChange={(e) => setSelectedFraudLevel(e.target.value as FraudLevel)}
+            >
+              {Object.values(FraudLevel).map(level => (
+                <option key={level} value={level}>{level}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="dropdown-container">
+            <label>Fraud Category:</label>
+            <select 
+              value={selectedFraudCategory} 
+              onChange={(e) => setSelectedFraudCategory(e.target.value)}
+            >
+              {fraudCategories.map(category => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="batch-label-buttons">
+            <button 
+              className="save-button" 
+              onClick={saveBatchLabels}
+              disabled={selectedTransactions.length === 0 || labelingInProgress}
+            >
+              {labelingInProgress ? 'Saving...' : 'Save'}
+            </button>
+            <button 
+              className="cancel-button" 
+              onClick={cancelBatchLabel}
+              disabled={labelingInProgress}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="table-container">
         <table>
           <thead>
             <tr>
+              {batchLabelMode && (
+                <th>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedTransactions.length === filteredTransactions.length && filteredTransactions.length > 0}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+              )}
               <th>ID</th>
               <th>Order #</th>
               <th>Customer</th>
@@ -134,6 +291,15 @@ export function Transactions() {
           <tbody>
             {filteredTransactions.map((transaction) => (
               <tr key={transaction.order.id}>
+                {batchLabelMode && (
+                  <td>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedTransactions.includes(transaction.order.id)}
+                      onChange={() => toggleTransactionSelection(transaction.order.id)}
+                    />
+                  </td>
+                )}
                 <td>
                   <div className="id-cell">
                     <span className="user-icon">👤</span>
@@ -161,6 +327,9 @@ export function Transactions() {
       
       <div className="footer">
         Records: {filteredTransactions.length}
+        {batchLabelMode && selectedTransactions.length > 0 && (
+          <span className="selected-count">, Selected: {selectedTransactions.length}</span>
+        )}
       </div>
     </div>
   );

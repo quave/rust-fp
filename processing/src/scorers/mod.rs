@@ -1,6 +1,6 @@
-pub mod rule_based;
+pub mod expression_based;
 
-pub use rule_based::*;
+pub use expression_based::*;
 
 use crate::model::{Feature, ScorerResult};
 use async_trait::async_trait;

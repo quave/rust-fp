@@ -14,3 +14,6 @@ processor:
   threads: 2
   log_level: info
   sleep_ms: 1000
+  matcher_configs:
+    customer.email: [100, 100]
+    customer.phone: [100, 80]

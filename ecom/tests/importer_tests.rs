@@ -4,7 +4,7 @@ use axum::{
 };
 use tower::util::ServiceExt;
 use processing::executable_utils::{health_check, import_transaction};
-use processing::test_utils::{setup_test_environment, MockQueue, get_test_database_url};
+use processing::test_helpers::{setup_test_environment, MockQueue, get_test_database_url};
 use processing::importer::Importer;
 use ecom::{
     ecom_order_storage::EcomOrderStorage,

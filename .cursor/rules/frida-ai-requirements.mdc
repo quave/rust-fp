@@ -1,0 +1,141 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Frida-AI: Fraud Detection and Risk Analysis System
+
+## Project Overview
+Frida-AI is a comprehensive fraud detection and risk analysis system designed to process, analyze, and score any transactional data to identify potentially fraudulent activity. The system employs a rule-based scoring mechanism and provides tools for transaction analysis, monitoring, and labeling.
+
+## Architecture
+
+### Core Components
+1. **Processing Engine**: Central service that extracts features from transactions, applies scoring rules, and detects connections between transactions.
+2. **E-commerce Connector**: Specialized module for handling e-commerce order data.
+3. **Backend API**: Service for accessing transaction data and scores.
+4. **Importer**: Service for importing new transaction data.
+5. **Web Interface**: React-based UI for viewing and managing transactions.
+6. **Database**: PostgreSQL for storing transactions, features, scores, and rules.
+
+### Model-Agnostic Design
+The core of Frida-AI is designed to be model-agnostic. This means the central processing, scoring, and analysis components work with any transaction type that implements the required traits. Domain-specific transaction models (like e-commerce orders) are implemented in separate modules/projects that connect to the core system.
+
+### Requirements for New Model Types
+To implement a new model type, you must:
+
+1. **Implement Required Traits**:
+   - `Processible`: For transaction processing and feature extraction
+   - `Importable`: For data validation and import
+   - `WebTransaction`: For web interface integration
+   - `ModelRegistryProvider`: For database schema registration
+
+2. **Create Storage Implementation**:
+   - Implement database operations for the new model type
+   - Connect to the core storage interfaces
+
+3. **Define Feature Extraction Logic**:
+   - Implement domain-specific feature extraction
+   - Map model attributes to features used by the scoring system
+
+4. **Build Model-Specific Executables**:
+   - Create model-specific importer, processor, and backend binaries
+   - Configure the executables to use the model-specific implementations
+
+### Data Model
+- **Transactions**: Core entity representing potential fraud cases
+- **Features**: Extracted properties from transactions used for scoring
+- **Labels**: Manual or automatic fraud assessments (Fraud, NoFraud, BlockedAutomatically, etc.)
+- **Scoring Events**: Results of fraud detection runs
+- **Channels**: Processing pipelines with specific models 
+- **Models**: Rule collections for specific types of fraud detection
+- **Connected Transactions**: Relationships between transactions based on shared attributes
+- **E-commerce specific models**: Orders, Order Items, Customer Data, Billing Data
+
+## Technology Stack
+- **Backend**: Rust with Tokio async runtime
+- **Database**: PostgreSQL with SQLx for database access
+- **API**: Axum or Actix Web for REST services
+- **Web Frontend**: React with TypeScript and Vite
+- **Config**: YAML-based configuration with environment overrides
+- **Container**: Docker and Docker Compose
+
+## Project Structure
+```
+frida-ai/
+├── common/                 # Shared utilities and types
+├── proc-macros/            # Procedural macros for code generation
+├── processing/             # Core processing engine
+├── ecom/                   # E-commerce specific implementation
+├── migrations/             # SQL database migrations
+├── web/                    # Web frontend
+├── config/                 # Base configuration files
+├── aux/                    # Auxiliary scripts and tools
+```
+
+## Key Features
+
+### Fraud Detection
+- Feature extraction from transaction data
+- Rule-based scoring system with configurable rules
+- Transaction labeling (manual and automatic)
+- Transaction relationship detection
+
+### E-commerce Specific
+- Order processing and analysis
+- Payment method risk assessment
+- Customer behavior analysis
+- Product category risk analysis
+
+### System Features
+- Asynchronous processing queue
+- Multi-threaded transaction processing
+- Database transaction handling
+- Configurable matching algorithms for finding related transactions
+- Extensible scoring system
+
+## Development Requirements
+
+### Code Organization
+- Follow Rust module organization patterns
+- Keep domain-specific logic in dedicated modules
+- Use workspace structure for component separation
+- Maintain clear separation between core processing and domain-specific implementations
+
+### Implementation Guidelines
+- Implement async processing using Tokio
+- Leverage SQLx for type-safe database access
+- Use traits for abstracting storage, processing, and scoring components
+- Employ Serde for serialization/deserialization
+- Follow SQL migration patterns for database schema evolution
+- Apply proper error handling with anyhow/thiserror
+- Create proper abstractions for model-specific logic to keep core components reusable
+
+### Testing
+- Write unit tests for core functionality
+- Create integration tests for database operations
+- Develop end-to-end tests for complete workflows
+- Test model-specific implementations separately from core components
+
+### Performance Considerations
+- Optimize database query patterns
+- Handle large transaction volumes efficiently
+- Implement proper connection pooling
+- Design for horizontal scalability
+
+## Environment Setup
+- Development environment using Docker Compose
+- Separate configurations for development, testing, and production
+- Sample data script for development and testing
+
+## Extending with New Models
+To extend Frida-AI with a new transaction type:
+
+1. Create a new Rust crate in the workspace
+2. Implement the domain-specific data models
+3. Implement the required traits from the processing module
+4. Create storage implementations for the new models
+5. Add database migrations for any new tables
+6. Create configuration files for the new implementation
+7. Build executables that use the new model type with the core processing engine
+8. Update the web interface to display the new transaction type if needed

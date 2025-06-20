@@ -51,4 +51,3 @@ CREATE TABLE IF NOT EXISTS billing_data (
 );
 CREATE INDEX IF NOT EXISTS idx_billing_data_order_id ON billing_data(order_id);
 CREATE INDEX IF NOT EXISTS idx_billing_data_created_at ON billing_data(created_at);
-

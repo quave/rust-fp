@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, scoring_events_id, rule_id\n            FROM triggered_rules\n            WHERE scoring_events_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "scoring_events_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "rule_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4dd050b6f2db24f40052b1d1178a8bdec83a5a5b09ba56201cb27bed8134c62a"
+}

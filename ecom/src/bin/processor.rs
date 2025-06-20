@@ -6,14 +6,14 @@ use processing::{
     executable_utils::initialize_executable,
     processor::Processor,
     queue::ProdQueue,
-    scorers::RuleBasedScorer,
+    scorers::ExpressionBasedScorer,
     storage::ProdCommonStorage,
 };
 
 use ecom::{
     ecom_db_model::Order,
     ecom_order_storage::EcomOrderStorage,
-    rule_based_scorer::get_rule_based_scorer,
+    expression_based_scorer::get_expression_based_scorer,
 };
 
 #[tokio::main]
@@ -43,8 +43,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
     
     // Create processor
-    let processor = Processor::<Order, RuleBasedScorer>::new(
-        get_rule_based_scorer(),
+    let processor = Processor::<Order, ExpressionBasedScorer>::new(
+        get_expression_based_scorer(),
         common_storage,
         model_storage,
         queue,

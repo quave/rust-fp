@@ -1,16 +1,18 @@
 use std::error::Error;
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::Utc;
 use async_trait::async_trait;
 
 use processing::{
-    model::{Feature, FeatureValue, ModelId, Processible, MatchingField, ScorerResult, ConnectedTransaction, DirectConnection},
+    model::{
+        Feature, FeatureValue, ModelId, Processible, MatchingField, ScorerResult, ConnectedTransaction, DirectConnection, 
+        TriggeredRule, Channel, ScoringEvent, Label, FraudLevel, LabelSource
+    },
     processor::Processor,
-    queue::QueueService,
-    storage::{CommonStorage, ProcessibleStorage, MatcherConfig},
     scorers::Scorer,
+    queue::QueueService,
+    storage::{ProcessibleStorage, CommonStorage},
 };
 
 // Define a test transaction struct to use in tests
@@ -139,7 +141,9 @@ impl CommonStorage for MockCommonStorage {
     async fn save_scores(
         &self,
         _transaction_id: i64,
-        _scores: &[ScorerResult],
+        _channel_id: i64,
+        _total_score: i32,
+        _triggered_rules: &[TriggeredRule],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
@@ -167,13 +171,58 @@ impl CommonStorage for MockCommonStorage {
         &self,
         _transaction_id: i64,
         _matching_fields: &[MatchingField],
-        _matcher_configs: &HashMap<String, MatcherConfig>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
-
-    fn get_matcher_configs(&self) -> HashMap<String, MatcherConfig> {
-        HashMap::new()
+    
+    async fn get_channels(
+        &self,
+        _model_id: ModelId,
+    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn get_scoring_events(
+        &self,
+        _transaction_id: ModelId,
+    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn get_triggered_rules(
+        &self,
+        _scoring_event_id: ModelId,
+    ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn save_label(
+        &self,
+        _label: &Label,
+    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+        Ok(1) // Return a dummy label ID
+    }
+    
+    async fn get_label(
+        &self,
+        _label_id: ModelId,
+    ) -> Result<Label, Box<dyn Error + Send + Sync>> {
+        Ok(Label {
+            id: 1,
+            fraud_level: FraudLevel::NoFraud,
+            fraud_category: "Test".to_string(),
+            label_source: LabelSource::Manual,
+            labeled_by: "test".to_string(),
+            created_at: Utc::now(),
+        })
+    }
+    
+    async fn update_transaction_label(
+        &self,
+        _transaction_id: ModelId,
+        _label_id: ModelId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Ok(())
     }
 }
 
@@ -228,7 +277,9 @@ impl CommonStorage for ConnectionTrackingStorage {
     async fn save_scores(
         &self,
         _transaction_id: i64,
-        _scores: &[ScorerResult],
+        _channel_id: i64,
+        _total_score: i32,
+        _triggered_rules: &[TriggeredRule],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
@@ -258,13 +309,58 @@ impl CommonStorage for ConnectionTrackingStorage {
         &self,
         _transaction_id: i64,
         _matching_fields: &[MatchingField],
-        _matcher_configs: &HashMap<String, MatcherConfig>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
-
-    fn get_matcher_configs(&self) -> HashMap<String, MatcherConfig> {
-        HashMap::new()
+    
+    async fn get_channels(
+        &self,
+        _model_id: ModelId,
+    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn get_scoring_events(
+        &self,
+        _transaction_id: ModelId,
+    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn get_triggered_rules(
+        &self,
+        _scoring_event_id: ModelId,
+    ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn save_label(
+        &self,
+        _label: &Label,
+    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+        Ok(1) // Return a dummy label ID
+    }
+    
+    async fn get_label(
+        &self,
+        _label_id: ModelId,
+    ) -> Result<Label, Box<dyn Error + Send + Sync>> {
+        Ok(Label {
+            id: 1,
+            fraud_level: FraudLevel::NoFraud,
+            fraud_category: "Test".to_string(),
+            label_source: LabelSource::Manual,
+            labeled_by: "test".to_string(),
+            created_at: Utc::now(),
+        })
+    }
+    
+    async fn update_transaction_label(
+        &self,
+        _transaction_id: ModelId,
+        _label_id: ModelId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Ok(())
     }
 }
 
@@ -649,7 +745,9 @@ impl CommonStorage for MockConnectionStorage {
     async fn save_scores(
         &self,
         _transaction_id: i64,
-        _scores: &[ScorerResult],
+        _channel_id: i64,
+        _total_score: i32,
+        _triggered_rules: &[TriggeredRule],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
@@ -677,13 +775,58 @@ impl CommonStorage for MockConnectionStorage {
         &self,
         _transaction_id: i64,
         _matching_fields: &[MatchingField],
-        _matcher_configs: &HashMap<String, MatcherConfig>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
-
-    fn get_matcher_configs(&self) -> HashMap<String, MatcherConfig> {
-        HashMap::new()
+    
+    async fn get_channels(
+        &self,
+        _model_id: ModelId,
+    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn get_scoring_events(
+        &self,
+        _transaction_id: ModelId,
+    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn get_triggered_rules(
+        &self,
+        _scoring_event_id: ModelId,
+    ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>> {
+        Ok(vec![])
+    }
+    
+    async fn save_label(
+        &self,
+        _label: &Label,
+    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+        Ok(1) // Return a dummy label ID
+    }
+    
+    async fn get_label(
+        &self,
+        _label_id: ModelId,
+    ) -> Result<Label, Box<dyn Error + Send + Sync>> {
+        Ok(Label {
+            id: 1,
+            fraud_level: FraudLevel::NoFraud,
+            fraud_category: "Test".to_string(),
+            label_source: LabelSource::Manual,
+            labeled_by: "test".to_string(),
+            created_at: Utc::now(),
+        })
+    }
+    
+    async fn update_transaction_label(
+        &self,
+        _transaction_id: ModelId,
+        _label_id: ModelId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Ok(())
     }
 }
 

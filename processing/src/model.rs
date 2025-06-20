@@ -2,6 +2,9 @@ use async_trait::async_trait;
 use chrono::{serde::ts_seconds, DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{error::Error, fmt::Debug};
+use evalexpr::Value;
+
+use crate::ui_model::ModelRegistry;
 
 pub type ModelId = i64;
 
@@ -33,14 +36,30 @@ pub trait WebTransaction: Send + Sync + Serialize {
     fn id(&self) -> ModelId;
 }
 
+pub trait ModelRegistryProvider {
+    fn get_registry() -> &'static ModelRegistry;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggeredRule {
     pub id: ModelId,
-    pub transaction_id: ModelId,
-    pub rule_name: String,
-    pub rule_score: i32,
-    #[serde(with = "ts_seconds")]
-    pub created_at: DateTime<Utc>,
+    pub scoring_events_id: ModelId,
+    pub rule_id: ModelId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FraudLevel {
+    Fraud,
+    NoFraud,
+    BlockedAutomatically,
+    AccountTakeover,
+    NotCreditWorthy
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LabelSource {
+    Manual,
+    Api
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,9 +68,55 @@ pub struct MatchingField {
     pub value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Transaction {
     pub id: ModelId,
+    pub label_id: Option<ModelId>,
+    pub comment: Option<String>,
+    pub last_scoring_date: Option<DateTime<Utc>>,
+    pub processing_complete: bool,
+    #[serde(with = "ts_seconds")]
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Label {
+    pub id: ModelId,
+    pub fraud_level: FraudLevel,
+    pub fraud_category: String,
+    pub label_source: LabelSource,
+    pub labeled_by: String,
+    #[serde(with = "ts_seconds")]
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoringEvent {
+    pub id: ModelId,
+    pub transaction_id: ModelId,
+    pub channel_id: ModelId,
+    pub total_score: i32,
+    #[serde(with = "ts_seconds")]
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Channel {
+    pub id: ModelId,
+    pub name: String,
+    pub model_id: ModelId,
+    #[serde(with = "ts_seconds")]
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Model {
+    pub id: ModelId,
+    pub name: String,
+    pub features_schema_version_major: i32,
+    pub features_schema_version_minor: i32,
+    pub version: String,
+    pub model_type: String,
     #[serde(with = "ts_seconds")]
     pub created_at: DateTime<Utc>,
 }
@@ -82,6 +147,22 @@ impl PartialEq for FeatureValue {
             (FeatureValue::StringList(a), FeatureValue::StringList(b)) => a == b,
             (FeatureValue::BoolList(a), FeatureValue::BoolList(b)) => a == b,
             _ => false,
+        }
+    }
+}
+
+impl Into<Value> for FeatureValue {
+    fn into(self) -> Value {
+        match self {
+            FeatureValue::Int(v) => Value::Int(v),
+            FeatureValue::Double(v) => Value::Float(v),
+            FeatureValue::String(v) => Value::String(v),
+            FeatureValue::Bool(v) => Value::Boolean(v),
+            FeatureValue::DateTime(v) => Value::Int(v.timestamp_millis()),
+            FeatureValue::IntList(v) => Value::Tuple(v.into_iter().map(|x| Value::Int(x)).collect()),
+            FeatureValue::DoubleList(v) => Value::Tuple(v.into_iter().map(|x| Value::Float(x)).collect()),
+            FeatureValue::StringList(v) => Value::Tuple(v.into_iter().map(|x| Value::String(x)).collect()),
+            FeatureValue::BoolList(v) => Value::Tuple(v.into_iter().map(|x| Value::Boolean(x)).collect()),
         }
     }
 }

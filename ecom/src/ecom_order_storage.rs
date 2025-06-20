@@ -1,16 +1,16 @@
-use crate::{ecom_db_model::*, ecom_import_model::*};
+use crate::ecom_db_model::*;
+use crate::ecom_import_model::*;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use processing::{
-    model::ModelId,
-    storage::{ImportableStorage, ProcessibleStorage, WebStorage},
-};
+use processing::model::ModelId;
+use processing::storage::{ImportableStorage, ProcessibleStorage, WebStorage};
+use processing::ui_model::FilterRequest;
 use tracing::{debug, error, info};
-use sqlx::PgConnection;
+use sqlx::{PgConnection, postgres::PgPool};
 use std::{error::Error, marker::PhantomData};
+use chrono::{DateTime, Utc};
 
 pub struct EcomOrderStorage {
-    pub pool: sqlx::PgPool,
+    pub pool: PgPool,
     _phantom: PhantomData<Order>,
 }
 
@@ -195,20 +195,7 @@ impl EcomOrderStorage {
         }
     }
 
-    pub async fn filter_orders(&self, _filters: Option<String>) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>> {
-        let mut tx = self.pool.begin().await?;
-        let ids = sqlx::query!(r#"SELECT transaction_id FROM orders"#)
-            .fetch_all(&mut *tx)
-            .await?
-            .into_iter()
-            .map(|rec| rec.transaction_id)
-            .collect();
-        tx.commit().await?;
-        Ok(ids)
-    }
-
-    pub async fn get_orders_by_ids(&self, ids: Vec<ModelId>) -> Result<Vec<Order>, Box<dyn Error + Send + Sync>> {
-        let mut tx = self.pool.begin().await?;
+    pub async fn get_orders_by_ids(&self, transaction_ids: Vec<ModelId>, tx: &mut PgConnection) -> Result<Vec<Order>, Box<dyn Error + Send + Sync>> {
         let orders = sqlx::query_as!(DbOrder, 
             r#"SELECT id, 
                       transaction_id, 
@@ -216,7 +203,7 @@ impl EcomOrderStorage {
                       delivery_type, 
                       delivery_details, 
                       created_at as "created_at: DateTime<Utc>" 
-                FROM orders WHERE id = ANY($1)"#, &ids)
+                FROM orders WHERE transaction_id = ANY($1)"#, &transaction_ids)
             .fetch_all(&mut *tx)
             .await?;
 
@@ -249,7 +236,6 @@ impl EcomOrderStorage {
         )
         .fetch_all(&mut *tx)
         .await?;
-    tx.commit().await?;
 
         // Build Order objects by matching dependencies
         let orders = orders
@@ -281,6 +267,7 @@ impl EcomOrderStorage {
                 }
             })
             .collect();
+
         Ok(orders)
     }
 }
@@ -452,11 +439,14 @@ impl ProcessibleStorage<Order> for EcomOrderStorage {
 }
 
 #[async_trait]
-impl WebStorage<Order> for EcomOrderStorage {
-    async fn get_transactions(&self) -> Result<Vec<Order>, Box<dyn Error + Send + Sync>> {
-        let ids = self.filter_orders(None).await?;
-        self.get_orders_by_ids(ids).await
-    }
+impl WebStorage<Order> for EcomOrderStorage {    
+    async fn get_transactions(&self, filter: FilterRequest) -> Result<Vec<Order>, Box<dyn Error + Send + Sync>> {
+        let mut tx = self.pool.begin().await?;
+        let ids = self.filter_orders(filter, &mut tx).await?;
+        let res = self.get_orders_by_ids(ids, &mut tx).await?;
+        tx.commit().await?;
+        Ok(res)
+    }   
 
     async fn get_transaction(&self, id: ModelId) -> Result<Order, Box<dyn Error + Send + Sync>> {
         self.get_processible(id).await

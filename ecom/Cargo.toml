@@ -8,6 +8,7 @@ build = "build.rs"
 [dependencies]
 processing = { path = "../processing" }
 common = { path = "../common" }
+proc-macros = { path = "../proc-macros" }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }

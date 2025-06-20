@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO triggered_rules (scoring_events_id, rule_id)\n                VALUES ($1, $2)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "96a6d15bead370c7cfd00dd77bcbec0159ef559c5b094a45cfc24227b22cf4e8"
+}

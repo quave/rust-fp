@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        INSERT INTO match_node (\n                            matcher, value, confidence, importance\n                        ) \n                        VALUES ($1, $2, $3, $4)\n                        RETURNING id\n                        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a1b3da0812c972be3660474076586e9d444e04c42a2f08fc64c400069141c83e"
+}
