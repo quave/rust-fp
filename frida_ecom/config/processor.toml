@@ -1,0 +1,4 @@
+database_url = "sqlite:dev.sqlite3"
+threads = 2
+sleep_ms = 1000
+log_level = "info"

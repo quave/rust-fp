@@ -1,0 +1,30 @@
+[package]
+name = "frida_ecom"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+frida_core = { path = "../frida_core" }
+actix-web.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dotenv.workspace = true
+env_logger.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+sqlx = { workspace = true, features = [
+    "runtime-tokio-native-tls",
+    "sqlite",
+    "chrono",
+    "json",
+    "macros"
+]}
+clap.workspace = true
+toml.workspace = true
+
+[build-dependencies]
+fs_extra = "1.3"
