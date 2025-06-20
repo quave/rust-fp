@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, order_id, payment_type, payment_details, billing_address, created_at as \"created_at: DateTime<Utc>\"\n            FROM billing_data WHERE order_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "order_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "payment_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "payment_details",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "billing_address",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "73a643298168c7495896be13167f9e3c63efde1884a3cad3ee241c6a0702af94"
+}

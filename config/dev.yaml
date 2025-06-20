@@ -3,5 +3,8 @@
 importer:
   log_level: debug
 
+backend:
+  log_level: debug
+
 processor:
   log_level: debug,sqlx=info

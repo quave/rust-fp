@@ -1,5 +1,0 @@
-!include ../../config/dev.yaml
-
-importer:
-  project_name: frida_ecom
-  database_url: postgresql://frida:frida@0.0.0.0:5432/frida

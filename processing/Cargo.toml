@@ -1,0 +1,42 @@
+[package]
+name = "processing"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+common = { path = "../common" }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+dotenvy = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true, features = [
+    "runtime-tokio",
+    "tls-native-tls",
+    "postgres",
+    "chrono",
+    "uuid",
+    "json"
+]}
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+url = { workspace = true }
+yaml-rust2 = { workspace = true }
+regex = { workspace = true }
+once_cell = { workspace = true }
+axum = { workspace = true, features = ["macros"] }
+tower-http = { workspace = true, features = ["trace"] }
+tower = { workspace = true }
+clap = { version = "4.4", features = ["derive"] }
+jsonschema = "0.29.1"
+
+[lib]
+name = "processing"
+path = "src/lib.rs"

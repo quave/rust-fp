@@ -8,7 +8,7 @@ DROP TABLE IF EXISTS orders;
 CREATE TABLE IF NOT EXISTS orders (
     id BIGSERIAL PRIMARY KEY,
     transaction_id BIGINT NOT NULL,
-    order_number TEXT,
+    order_number TEXT NOT NULL,
     delivery_type TEXT NOT NULL,
     delivery_details TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),

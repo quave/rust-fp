@@ -1,10 +1,12 @@
+version: '3.8'
+
 services:
-  postgres:
-    image: postgres:15-alpine
+  db:
+    image: postgres:16
     environment:
-      POSTGRES_DB: frida
-      POSTGRES_USER: frida
-      POSTGRES_PASSWORD: frida
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=frida
     ports:
       - "5432:5432"
     volumes:

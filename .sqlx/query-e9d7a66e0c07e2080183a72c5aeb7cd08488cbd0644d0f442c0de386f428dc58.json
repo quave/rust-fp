@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, transaction_id, schema_version_major, schema_version_minor, payload\n            FROM features\n            WHERE transaction_id = $1\n            ORDER BY created_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "transaction_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "schema_version_major",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "schema_version_minor",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e9d7a66e0c07e2080183a72c5aeb7cd08488cbd0644d0f442c0de386f428dc58"
+}

@@ -1,7 +1,7 @@
 !include base.yaml
 
 common:
-  database_url: postgresql://frida:frida@0.0.0.0:5432/frida
+  database_url: postgresql://postgres:postgres@0.0.0.0:5432/frida
 
 processor:
   threads: 4
