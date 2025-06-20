@@ -1,20 +1,27 @@
 use actix_web::{test, web, App};
 use frida_core::executable_utils::{health_check, import_transaction};
-use frida_core::test_utils::initialize_test_schema;
-use frida_core::test_utils::MockQueue;
+use frida_core::test_utils::{setup_test_environment, MockQueue, get_test_database_url};
 use frida_ecom::{
     ecom_import_model::ImportOrder, ecom_order_storage::EcomOrderStorage,
 };
 use serde_json::json;
 use std::sync::Arc;
+use std::error::Error;
+use tokio::sync::OnceCell;
+
+static SETUP: OnceCell<()> = OnceCell::const_new();
+
+async fn ensure_setup() {
+    SETUP.get_or_init(|| async {
+        setup_test_environment().await.expect("Failed to setup test environment");
+    }).await;
+}
 
 #[actix_web::test]
-async fn test_import_endpoint() {
-    // Initialize test database
-    let storage = Arc::new(EcomOrderStorage::new("postgresql://frida:frida@0.0.0.0:5432/frida_test").await.unwrap());
-    initialize_test_schema(&storage.pool).await.unwrap();
-
-    // Initialize mock queue
+async fn test_import_endpoint() -> Result<(), Box<dyn Error + Send + Sync>> {
+    ensure_setup().await;
+    
+    let storage = Arc::new(EcomOrderStorage::new(&get_test_database_url()).await?);
     let queue = Arc::new(MockQueue::new());
 
     // Create test app
@@ -60,11 +67,7 @@ async fn test_import_endpoint() {
 
     // Send request and check response
     let resp = test::call_service(&app, req).await;
-    let status = resp.status();
-    let body = test::read_body(resp).await;
+    assert!(resp.status().is_success());
 
-    println!("Response status: {}", status);
-    println!("Response body: {:?}", String::from_utf8(body.to_vec()));
-
-    assert!(status.is_success());
+    Ok(())
 }

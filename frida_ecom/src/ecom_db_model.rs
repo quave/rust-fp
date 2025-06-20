@@ -55,7 +55,9 @@ pub struct Order {
     pub items: Vec<DbOrderItem>,
     pub customer: DbCustomerData,
     pub billing: DbBillingData,
+    
 }
+
 
 #[async_trait]
 impl Processible for Order {
@@ -63,18 +65,37 @@ impl Processible for Order {
         let mut features = Vec::new();
 
         features.push(Feature {
-            name: "order_total".to_string(),
+            name: "amount".to_string(),
             value: Box::new(FeatureValue::Double(
-                self.items.iter().map(|i| i.price).sum::<f32>() as f64,
+                self.items.iter().map(|i| i.price as f64).sum(),
             )),
         });
 
         features.push(Feature {
-            name: "item_count".to_string(),
-            value: Box::new(FeatureValue::Int(self.items.len() as i64)),
+            name: "amounts".to_string(),
+            value: Box::new(FeatureValue::DoubleList(
+                self.items.iter().map(|i| i.price as f64).collect(),
+            )),
         });
 
-        // Add more feature extraction logic...
+        features.push(Feature {
+            name: "categories".to_string(),
+            value: Box::new(FeatureValue::StringList(
+                self.items.iter().map(|i| i.category.clone()).collect(),
+            )),
+        });
+
+        features.push(Feature {
+            name: "created_at".to_string(),
+            value: Box::new(FeatureValue::DateTime(self.order.created_at)),
+        });
+
+        features.push(Feature {
+            name: "is_high_value".to_string(),
+            value: Box::new(FeatureValue::Bool(
+                self.items.iter().map(|i| i.price as f64).sum::<f64>() > 1000.0,
+            )),
+        });
 
         features
     }

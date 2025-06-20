@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use frida_core::{
     executable_utils::initialize_executable, model::Processible, processor::Processor,
-    queue::ProdQueue, scorers::RuleBasedScorer, storage::ProdCommonStorage,
+    queue::ProdQueue, scorers::RuleBasedScorer, storage::ProdCommonStorage
 };
 use frida_ecom::{
     ecom_db_model::Order, ecom_order_storage::EcomOrderStorage,

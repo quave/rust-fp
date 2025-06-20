@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS order_items;
 DROP TABLE IF EXISTS customers;
 DROP TABLE IF EXISTS billing_data;
+DROP TABLE IF EXISTS orders;
 
 
 CREATE TABLE IF NOT EXISTS orders (

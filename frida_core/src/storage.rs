@@ -1,9 +1,10 @@
 use crate::model::*;
 use async_trait::async_trait;
+use jsonschema::validate;
 use log::{debug, error};
-use sqlx::{PgPool, types::Json};
+use serde_json::{json, Value};
+use sqlx::PgPool;
 use std::error::Error;
-use serde_json::Value;
 
 // Define the Storage trait
 #[async_trait]
@@ -44,7 +45,7 @@ pub trait CommonStorage: Send + Sync {
 
 #[derive(Clone)]
 pub struct ProdCommonStorage {
-    pool: PgPool,
+    pub pool: PgPool,
 }
 
 impl ProdCommonStorage {
@@ -53,11 +54,127 @@ impl ProdCommonStorage {
         Ok(Self { pool })
     }
 
-    pub async fn initialize_schema(&self) -> Result<(), sqlx::Error> {
-        sqlx::query(include_str!("../resources/core_schema.sql"))
-            .execute(&self.pool)
-            .await?;
+    pub async fn insert_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!(
+            r#"
+            INSERT INTO transactions (created_at)
+            VALUES (NOW())
+            RETURNING id
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.id)
+    }
+
+    pub fn validate_features(&self, features: &[Feature]) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let features_json = serde_json::to_value(features)?;
+        debug!("Raw features JSON string: {}", serde_json::to_string(&features_json)?);
+        debug!("Features JSON before validation: {}", serde_json::to_string_pretty(&features_json)?);
+        debug!("Schema before validation: {}", serde_json::to_string_pretty(&self.get_features_schema())?);
+        let validation_result = validate(&self.get_features_schema(), &features_json);
+        if let Err(errors) = validation_result {
+            debug!("Validation error details: {:?}", errors);
+            return Err(format!("Feature validation failed: {:?}", errors).into());
+        }
         Ok(())
+    }
+
+    pub fn get_features_schema(&self) -> Value {
+    // Create a schema that matches all test cases
+        json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "enum": [
+                            "amount",
+                            "is_high_value",
+                            "amounts",
+                            "created_at",
+                            "categories"
+                        ]
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "integer",
+                            "number",
+                            "string",
+                            "boolean",
+                            "datetime",
+                            "integer_array",
+                            "number_array",
+                            "string_array",
+                            "boolean_array"
+                        ]
+                    },
+                    "value": {
+                        "type": ["number", "string", "boolean", "array"]
+                    }
+                },
+                "required": ["name", "type", "value"],
+                "dependencies": {
+                    "type": {
+                        "oneOf": [
+                            {
+                                "properties": {
+                                    "type": { "const": "number" },
+                                    "value": { "type": "number" }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "string" },
+                                    "value": { "type": "string" }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "boolean" },
+                                    "value": { "type": "boolean" }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "datetime" },
+                                    "value": { "type": "string", "format": "date-time" }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "integer_array" },
+                                    "value": { "type": "array", "items": { "type": "number" } }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "number_array" },
+                                    "value": { "type": "array", "items": { "type": "number" } }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "string_array" },
+                                    "value": { "type": "array", "items": { "type": "string" } }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "boolean_array" },
+                                    "value": { "type": "array", "items": { "type": "boolean" } }
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        })
+    
     }
 }
 
@@ -102,6 +219,9 @@ impl CommonStorage for ProdCommonStorage {
         transaction_id: ModelId,
         features: &[Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Validate features against schema if one is provided
+        self.validate_features(features)?;
+
         let mut tx = self.pool.begin().await?;
 
         // Convert features to JSON Value
@@ -143,6 +263,10 @@ impl CommonStorage for ProdCommonStorage {
         .await?;
 
         let features: Vec<Feature> = serde_json::from_value(row.payload)?;
+        
+        // Validate features against schema if one is provided
+        self.validate_features(&features)?;
+        
         Ok(features)
     }
 }

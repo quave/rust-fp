@@ -22,6 +22,109 @@ impl EcomOrderStorage {
             _phantom: PhantomData,
         })
     }
+
+    // Database insertion methods
+    pub async fn insert_order(
+        &self,
+        tx: &mut PgConnection,
+        transaction_id: ModelId,
+        order_number: &str,
+        delivery_type: &str,
+        delivery_details: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<i64, sqlx::Error> {
+        let order = sqlx::query!(
+            r#"
+            INSERT INTO orders (transaction_id, order_number, delivery_type, delivery_details, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            "#,
+            transaction_id,
+            order_number,
+            delivery_type,
+            delivery_details,
+            created_at.naive_utc()
+        )
+        .fetch_one(tx)
+        .await?;
+        Ok(order.id)
+    }
+
+    pub async fn insert_order_item(
+        &self,
+        tx: &mut PgConnection,
+        order_id: i64,
+        name: &str,
+        category: &str,
+        price: f32,
+        created_at: DateTime<Utc>,
+    ) -> Result<i64, sqlx::Error> {
+        let item = sqlx::query!(
+            r#"
+            INSERT INTO order_items (order_id, name, category, price, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            "#,
+            order_id,
+            name,
+            category,
+            price,
+            created_at.naive_utc()
+        )
+        .fetch_one(tx)
+        .await?;
+        Ok(item.id)
+    }
+
+    pub async fn insert_customer(
+        &self,
+        tx: &mut PgConnection,
+        order_id: i64,
+        name: &str,
+        email: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<i64, sqlx::Error> {
+        let customer = sqlx::query!(
+            r#"
+            INSERT INTO customers (order_id, name, email, created_at)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            "#,
+            order_id,
+            name,
+            email,
+            created_at.naive_utc()
+        )
+        .fetch_one(tx)
+        .await?;
+        Ok(customer.id)
+    }
+
+    pub async fn insert_billing(
+        &self,
+        tx: &mut PgConnection,
+        order_id: i64,
+        payment_type: &str,
+        payment_details: &str,
+        billing_address: &str,
+        created_at: DateTime<Utc>,
+    ) -> Result<i64, sqlx::Error> {
+        let billing = sqlx::query!(
+            r#"
+            INSERT INTO billing_data (order_id, payment_type, payment_details, billing_address, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            "#,
+            order_id,
+            payment_type,
+            payment_details,
+            billing_address,
+            created_at.naive_utc()
+        )
+        .fetch_one(tx)
+        .await?;
+        Ok(billing.id)
+    }
 }
 
 #[async_trait]
@@ -81,6 +184,7 @@ impl ProcessibleStorage<Order> for EcomOrderStorage {
     async fn get_processible(&self, id: ModelId) -> Result<Order, Box<dyn Error + Send + Sync>> {
         let mut tx = self.pool.begin().await?;
 
+        debug!("Getting order data for transaction_id: {}", id);
         // Get main order data
         let order = sqlx::query!(
             r#"
@@ -107,27 +211,34 @@ impl ProcessibleStorage<Order> for EcomOrderStorage {
             created_at: rec.created_at,
         })?;
 
+        debug!("Found order with id: {}", order.id);
+
         // Get order items
-        let items = sqlx::query!(
+        let items: Vec<DbOrderItem> = sqlx::query!(
             r#"
             SELECT id, order_id, name, category, price, created_at as "created_at: DateTime<Utc>"
             FROM order_items
             WHERE order_id = $1
             "#,
-            id
+            order.id
         )
         .fetch_all(&mut *tx)
         .await?
         .into_iter()
-        .map(|row| DbOrderItem {
-            id: row.id,
-            order_id: row.order_id,
-            name: row.name,
-            category: row.category,
-            price: row.price,
-            created_at: row.created_at,
+        .map(|row| {
+            debug!("Found item with id: {}, price: {}", row.id, row.price);
+            DbOrderItem {
+                id: row.id,
+                order_id: row.order_id,
+                name: row.name,
+                category: row.category,
+                price: row.price,
+                created_at: row.created_at,
+            }
         })
         .collect();
+
+        debug!("Found {} items for order {}", items.len(), order.id);
 
         // Get customer data
         let customer: DbCustomerData = sqlx::query!(
@@ -136,7 +247,7 @@ impl ProcessibleStorage<Order> for EcomOrderStorage {
             FROM customers
             WHERE order_id = $1
             "#,
-            id
+            order.id
         )
         .fetch_one(&mut *tx)
         .await
@@ -148,6 +259,8 @@ impl ProcessibleStorage<Order> for EcomOrderStorage {
             created_at: rec.created_at,
         })?;
 
+        debug!("Found customer with id: {}", customer.id);
+
         // Get billing data
         let billing: DbBillingData = sqlx::query!(
             r#"
@@ -155,7 +268,7 @@ impl ProcessibleStorage<Order> for EcomOrderStorage {
             FROM billing_data
             WHERE order_id = $1
             "#,
-            id
+            order.id
         )
         .fetch_one(&mut *tx)
         .await
@@ -167,6 +280,8 @@ impl ProcessibleStorage<Order> for EcomOrderStorage {
             billing_address: rec.billing_address,
             created_at: rec.created_at,
         })?;
+
+        debug!("Found billing with id: {}", billing.id);
 
         tx.commit().await?;
 
@@ -303,7 +418,7 @@ impl EcomOrderStorage {
                 order_id,
                 item.name,
                 item.category,
-                item.price as f32
+                item.price
             )
             .fetch_one(&mut *tx)
             .await
@@ -356,108 +471,3 @@ impl EcomOrderStorage {
     }
 
 }
-
-// // Helper functions for feature serialization
-// fn get_feature_type(value: &FeatureValue) -> &'static str {
-//     match value {
-//         FeatureValue::Int(_) => "INT",
-//         FeatureValue::Double(_) => "DOUBLE",
-//         FeatureValue::String(_) => "STRING",
-//         FeatureValue::Bool(_) => "BOOL",
-//         FeatureValue::DateTime(_) => "DATETIME",
-//         FeatureValue::IntList(_) => "INT_LIST",
-//         FeatureValue::DoubleList(_) => "DOUBLE_LIST",
-//         FeatureValue::StringList(_) => "STRING_LIST",
-//         FeatureValue::BoolList(_) => "BOOL_LIST",
-//     }
-// }
-
-// fn serialize_feature_value(value: &FeatureValue) -> Result<String, serde_json::Error> {
-//     Ok(match value {
-//         FeatureValue::Int(v) => json!({ "type": "int", "value": v }).to_string(),
-//         FeatureValue::Double(v) => json!({ "type": "double", "value": v }).to_string(),
-//         FeatureValue::String(v) => json!({ "type": "string", "value": v }).to_string(),
-//         FeatureValue::Bool(v) => json!({ "type": "bool", "value": v }).to_string(),
-//         FeatureValue::DateTime(v) => {
-//             json!({ "type": "datetime", "value": v.to_rfc3339() }).to_string()
-//         }
-//         FeatureValue::IntList(v) => json!({ "type": "int_list", "value": v }).to_string(),
-//         FeatureValue::DoubleList(v) => json!({ "type": "double_list", "value": v }).to_string(),
-//         FeatureValue::StringList(v) => json!({ "type": "string_list", "value": v }).to_string(),
-//         FeatureValue::BoolList(v) => json!({ "type": "bool_list", "value": v }).to_string(),
-//     })
-// }
-
-// fn deserialize_feature_value(json_str: &str) -> Result<FeatureValue, Box<dyn Error + Send + Sync>> {
-//     let value: Value = serde_json::from_str(json_str)?;
-
-//     let type_str = value["type"]
-//         .as_str()
-//         .ok_or("Missing or invalid 'type' field")?;
-
-//     match type_str {
-//         "int" => Ok(FeatureValue::Int(
-//             value["value"].as_i64().ok_or("Invalid integer value")?,
-//         )),
-
-//         "double" => Ok(FeatureValue::Double(
-//             value["value"].as_f64().ok_or("Invalid double value")?,
-//         )),
-
-//         "string" => Ok(FeatureValue::String(
-//             value["value"]
-//                 .as_str()
-//                 .ok_or("Invalid string value")?
-//                 .to_string(),
-//         )),
-
-//         "bool" => Ok(FeatureValue::Bool(
-//             value["value"].as_bool().ok_or("Invalid boolean value")?,
-//         )),
-
-//         "datetime" => {
-//             let datetime_str = value["value"].as_str().ok_or("Invalid datetime string")?;
-//             Ok(FeatureValue::DateTime(
-//                 DateTime::parse_from_rfc3339(datetime_str)?.with_timezone(&Utc),
-//             ))
-//         }
-
-//         "int_list" => {
-//             let values = value["value"].as_array().ok_or("Invalid array value")?;
-//             let mut list = Vec::new();
-//             for v in values {
-//                 list.push(v.as_i64().ok_or("Invalid integer in array")?);
-//             }
-//             Ok(FeatureValue::IntList(list))
-//         }
-
-//         "double_list" => {
-//             let values = value["value"].as_array().ok_or("Invalid array value")?;
-//             let mut list = Vec::new();
-//             for v in values {
-//                 list.push(v.as_f64().ok_or("Invalid double in array")?);
-//             }
-//             Ok(FeatureValue::DoubleList(list))
-//         }
-
-//         "string_list" => {
-//             let values = value["value"].as_array().ok_or("Invalid array value")?;
-//             let mut list = Vec::new();
-//             for v in values {
-//                 list.push(v.as_str().ok_or("Invalid string in array")?.to_string());
-//             }
-//             Ok(FeatureValue::StringList(list))
-//         }
-
-//         "bool_list" => {
-//             let values = value["value"].as_array().ok_or("Invalid array value")?;
-//             let mut list = Vec::new();
-//             for v in values {
-//                 list.push(v.as_bool().ok_or("Invalid boolean in array")?);
-//             }
-//             Ok(FeatureValue::BoolList(list))
-//         }
-
-//         _ => Err("Unknown feature value type".into()),
-//     }
-// }

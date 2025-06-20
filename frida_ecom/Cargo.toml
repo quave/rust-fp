@@ -25,6 +25,7 @@ sqlx = { workspace = true, features = [
     "macros"
 ]}
 clap.workspace = true
+jsonschema.workspace = true
 
 [build-dependencies]
 fs_extra = "1.3"

@@ -1,5 +1,4 @@
 use std::error::Error;
-
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +8,7 @@ use frida_core::model::{Importable, ImportableSerde};
 pub struct ImportOrderItem {
     pub name: String,
     pub category: String,
-    pub price: f64,
+    pub price: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

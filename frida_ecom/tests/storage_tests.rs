@@ -1,23 +1,30 @@
 use std::error::Error;
 
-use frida_core::{storage::{ImportableStorage, ProcessibleStorage}, test_utils::initialize_test_schema};
+use frida_core::{
+    storage::{ImportableStorage, ProcessibleStorage}, 
+    test_utils::{setup_test_environment, get_test_database_url},
+};
 use frida_ecom::{ecom_import_model::*, ecom_order_storage::EcomOrderStorage};
+use tokio::sync::OnceCell;
 
-async fn setup_test_db() -> EcomOrderStorage {
-    let storage = EcomOrderStorage::new("postgresql://frida:frida@0.0.0.0:5432/frida_test")
+static SETUP: OnceCell<()> = OnceCell::const_new();
+
+async fn ensure_setup() {
+    SETUP.get_or_init(|| async {
+        setup_test_environment().await.expect("Failed to setup test environment");
+    }).await;
+}
+
+async fn get_test_storage() -> EcomOrderStorage {
+    ensure_setup().await;
+    EcomOrderStorage::new(&get_test_database_url())
         .await
-        .expect("Failed to create storage");
-
-    initialize_test_schema(&storage.pool)
-        .await
-        .expect("Failed to initialize schema");
-
-    storage
+        .expect("Failed to create storage")
 }
 
 #[tokio::test]
 async fn test_save_and_retrieve_order() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let storage = setup_test_db().await;
+    let storage = get_test_storage().await;
     let test_order = ImportOrder {
         order_number: "TEST-123".to_string(),
         items: vec![ImportOrderItem {
