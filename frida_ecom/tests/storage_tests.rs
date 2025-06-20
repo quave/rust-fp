@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use frida_core::storage::Storage;
+use frida_core::storage::{ImportableStorage, ProcessibleStorage};
 use frida_ecom::{ecom_import_model::*, sqlite_order_storage::SqliteOrderStorage};
 
 async fn setup_test_db() -> SqliteOrderStorage {
@@ -43,7 +43,7 @@ async fn test_save_and_retrieve_order() -> Result<(), Box<dyn Error + Send + Syn
     let id: i64 = storage.save_transaction(&test_order).await?;
 
     // Test retrieving
-    let retrieved_order = storage.get_transaction(&id).await?;
+    let retrieved_order = storage.get_transaction(id).await?;
 
     assert_eq!(test_order.order_number, retrieved_order.order.order_number);
     assert_eq!(test_order.customer.name, retrieved_order.customer.name);

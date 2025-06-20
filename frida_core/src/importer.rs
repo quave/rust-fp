@@ -1,60 +1,46 @@
-use crate::{
-    model::{Importable, Processible},
-    queue_service::QueueService,
-    storage::Storage,
-};
-use log::{debug, info, warn};
-use std::{error::Error, marker::PhantomData};
+use std::{error::Error, sync::Arc};
 
-pub struct Importer<T: Processible, IT: Importable, ST: Storage<IT, T>, Q: QueueService<T>> {
-    storage: ST,
-    queue: Q,
-    _phantom_t: PhantomData<T>,
-    _phantom_it: PhantomData<IT>,
+use crate::{
+    model::{Importable, ImportableSerde, ModelId, Processible},
+    queue::QueueService,
+    storage::ImportableStorage,
+};
+use log::{debug, info};
+
+pub struct Importer<I: Importable, P: Processible> {
+    importable_storage: Arc<dyn ImportableStorage<I>>,
+    queue: Arc<dyn QueueService<P>>,
 }
 
-impl<T, IT, ST, Q> Importer<T, IT, ST, Q>
-where
-    T: Processible,
-    IT: Importable,
-    ST: Storage<IT, T>,
-    Q: QueueService<T>,
-{
-    pub fn new(storage: ST, queue: Q) -> Self {
+impl<I: Importable, P: Processible> Importer<I, P> {
+    pub fn new(
+        importable_storage: Arc<dyn ImportableStorage<I>>,
+        queue: Arc<dyn QueueService<P>>,
+    ) -> Self {
         info!("Initializing new Importer");
         Self {
-            storage,
+            importable_storage,
             queue,
-            _phantom_t: PhantomData,
-            _phantom_it: PhantomData,
         }
     }
 
-    pub async fn import(&self, transaction: IT) -> Result<T::Id, Box<dyn Error + Send + Sync>> {
+    pub fn extract_model<IS: ImportableSerde + 'static>(
+        json: &str,
+    ) -> Result<Box<dyn Importable>, Box<dyn Error + Send + Sync>> {
+        let model: IS = serde_json::from_str(json)?;
+        Ok(Box::new(model))
+    }
+
+    pub async fn import(&self, transaction: I) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
         debug!("Starting import process for new transaction");
 
-        // Save the transaction
-        let transaction_id = match self.storage.save_transaction(&transaction).await {
-            Ok(id) => {
-                info!("Successfully saved transaction with ID: {:?}", id);
-                id
-            }
-            Err(e) => {
-                warn!("Failed to save transaction: {}", e);
-                return Err(e);
-            }
-        };
+        let id = self
+            .importable_storage
+            .save_transaction(&transaction)
+            .await?;
+        self.queue.enqueue(id).await?;
+        info!("Successfully queued transaction {:?} for processing", id);
 
-        // Queue for processing
-        if let Err(e) = self.queue.enqueue(&transaction_id).await {
-            warn!("Failed to queue transaction {:?}: {}", transaction_id, e);
-            return Err(e);
-        }
-        info!(
-            "Successfully queued transaction {:?} for processing",
-            transaction_id
-        );
-
-        Ok(transaction_id)
+        Ok(id)
     }
 }

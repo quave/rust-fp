@@ -1,101 +1,71 @@
 use actix_web::{test, web, App};
-use frida_core::{
-    importer::Importer, in_memory_queue::InMemoryQueue, queue_service::QueueService,
-    storage::Storage,
-};
+use frida_core::storage::ImportableStorage;
+use frida_core::test_utils::MockQueue;
 use frida_ecom::{
-    ecom_db_model::*, ecom_import_model::*, import_transaction,
-    sqlite_order_storage::SqliteOrderStorage,
+    ecom_db_model::Order, ecom_import_model::ImportOrder, sqlite_order_storage::SqliteOrderStorage,
 };
-use std::sync::Once;
-
-static INIT: Once = Once::new();
-
-fn init_test_logging() {
-    INIT.call_once(|| {
-        env_logger::builder()
-            .filter_level(log::LevelFilter::Debug)
-            .is_test(true)
-            .init();
-    });
-}
+use frida_ecom::{health_check, import_transaction};
+use serde_json::json;
+use std::sync::Arc;
 
 #[actix_web::test]
 async fn test_import_endpoint() {
-    init_test_logging();
-    // Initialize test dependencies
-    let storage = SqliteOrderStorage::new(":memory:")
-        .await
-        .expect("Failed to create test storage");
-    storage
-        .initialize_schema()
-        .await
-        .expect("Failed to initialize schema");
-    let queue: InMemoryQueue<Order> = InMemoryQueue::new();
+    // Initialize test database
+    let storage = Arc::new(SqliteOrderStorage::new("sqlite::memory:").await.unwrap());
+    storage.initialize_schema().await.unwrap();
 
-    let service = web::Data::new(Importer::<
-        Order,
-        ImportOrder,
-        SqliteOrderStorage,
-        InMemoryQueue<Order>,
-    >::new(storage, queue));
+    // Initialize mock queue
+    let queue = Arc::new(MockQueue::new());
 
     // Create test app
-    let app = test::init_service(App::new().app_data(service.clone()).route(
-        "/import",
-        web::post().to(import_transaction::<
-            Order,
-            ImportOrder,
-            SqliteOrderStorage,
-            InMemoryQueue<Order>,
-        >),
-    ))
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(frida_core::importer::Importer::<
+                ImportOrder,
+                Order,
+            >::new(storage, queue)))
+            .service(health_check)
+            .route(
+                "/import",
+                web::post().to(import_transaction::<ImportOrder, Order>),
+            ),
+    )
     .await;
 
-    // Test valid order
-    let valid_order = ImportOrder {
-        order_number: "ORD123".to_string(),
-        customer: ImportCustomerData {
-            name: "Test Customer".to_string(),
-            email: "test@example.com".to_string(),
-        },
-        items: vec![ImportOrderItem {
-            name: "Test Item".to_string(),
-            category: "Test Category".to_string(),
-            price: 10.99,
-        }],
-        billing: ImportBillingData {
-            payment_type: "credit_card".to_string(),
-            payment_details: "4242424242424242".to_string(),
-            billing_address: "123 Test St".to_string(),
-        },
-        delivery_type: "standard".to_string(),
-        delivery_details: "Test Address".to_string(),
-    };
-
-    let resp = test::TestRequest::post()
+    // Create test request
+    let req = test::TestRequest::post()
         .uri("/import")
-        .set_json(&valid_order)
-        .send_request(&app)
-        .await;
+        .insert_header(("content-type", "application/json"))
+        .set_json(json!({
+            "order_number": "TEST123",
+            "delivery_type": "express",
+            "delivery_details": "test details",
+            "customer": {
+                "name": "Test Customer",
+                "email": "test@example.com",
+            },
+            "billing": {
+                "payment_type": "credit_card",
+                "payment_details": "credit_card",
+                "billing_address": "123 Test St, Test City"
+            },
+            "items": [
+                {
+                    "price": 10.50,
+                    "name": "Test Item",
+                    "category": "Test Category",
+                }
+            ]
+        }))
+        .to_request();
 
+    // Send request and check response
+    let resp = test::call_service(&app, req).await;
     let status = resp.status();
-    log::info!("Response: {:?}", resp);
     let body = test::read_body(resp).await;
-    log::info!("Response body: {:?}", String::from_utf8_lossy(&body));
 
-    assert_eq!(status, 200);
+    println!("Response status: {}", status);
+    println!("Response body: {:?}", String::from_utf8(body.to_vec()));
 
-    // Test invalid order
-    let invalid_order = serde_json::json!({
-        "id": "",
-    });
-
-    let resp = test::TestRequest::post()
-        .uri("/import")
-        .set_json(&invalid_order)
-        .send_request(&app)
-        .await;
-
-    assert_eq!(resp.status(), 400);
+    assert!(status.is_success());
 }

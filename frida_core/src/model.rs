@@ -1,25 +1,26 @@
 use async_trait::async_trait;
 use chrono::{serde::ts_seconds, DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{
-    fmt::{Debug, Display},
-    str::FromStr,
-};
+use std::{error::Error, fmt::Debug};
+
+pub type ModelId = i64;
 
 #[async_trait]
-pub trait Processible: Sized + Send + Sync + Debug + Clone + Serialize + DeserializeOwned {
-    type Id: Send + Sync + Debug + Clone + Serialize + DeserializeOwned + Display + FromStr;
-
-    async fn extract_features(&self) -> Vec<Feature>;
-    fn get_id(&self) -> Self::Id;
+pub trait Processible: Send + Sync {
+    fn id(&self) -> ModelId;
+    fn extract_features(&self) -> Vec<Feature>;
+    fn as_json(&self) -> Result<String, Box<dyn Error + Send + Sync>>;
 }
 
 #[async_trait]
-pub trait Importable: Send + Sync + Debug + Clone + Serialize + DeserializeOwned {
-    // async fn save<P: Processible>(
-    //     &self,
-    //     storage: &dyn Storage<Self, P>,
-    // ) -> Result<P, Box<dyn Error + Send + Sync>>;
+pub trait Importable: Send + Sync {
+    fn validate(&self) -> Result<(), String>;
+}
+
+#[async_trait]
+pub trait ImportableSerde: Importable + DeserializeOwned {
+    fn as_json(&self) -> Result<String, Box<dyn Error + Send + Sync>>;
+    fn from_json(json: &str) -> Result<Self, Box<dyn Error + Send + Sync>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +50,7 @@ pub enum FeatureValue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Feature {
     pub name: String,
-    pub value: FeatureValue,
+    pub value: Box<FeatureValue>,
 }
 
 pub struct ScorerResult {

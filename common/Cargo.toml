@@ -1,0 +1,15 @@
+[package]
+name = "common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde_yaml.workspace = true
+serde.workspace = true
+yaml-rust2.workspace = true
+
+[lib]
+name = "common"
+path = "src/lib.rs"
+

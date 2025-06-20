@@ -1,0 +1,7 @@
+!include base.yaml
+
+importer:
+  log_level: debug
+
+processor:
+  log_level: debug

@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use async_trait::async_trait;
 use chrono::{serde::ts_seconds, DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -55,28 +57,32 @@ pub struct Order {
 }
 
 #[async_trait]
-impl<'a> Processible for Order {
-    type Id = i64;
-
-    fn get_id(&self) -> Self::Id {
-        self.order.id
-    }
-
-    async fn extract_features(&self) -> Vec<Feature> {
+impl Processible for Order {
+    fn extract_features(&self) -> Vec<Feature> {
         let mut features = Vec::new();
 
         features.push(Feature {
             name: "order_total".to_string(),
-            value: FeatureValue::Double(self.items.iter().map(|i| i.price).sum()),
+            value: Box::new(FeatureValue::Double(
+                self.items.iter().map(|i| i.price).sum(),
+            )),
         });
 
         features.push(Feature {
             name: "item_count".to_string(),
-            value: FeatureValue::Int(self.items.len() as i64),
+            value: Box::new(FeatureValue::Int(self.items.len() as i64)),
         });
 
         // Add more feature extraction logic...
 
         features
+    }
+
+    fn id(&self) -> i64 {
+        self.order.id
+    }
+
+    fn as_json(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+        Ok(serde_json::to_string(self)?)
     }
 }

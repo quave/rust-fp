@@ -1,7 +1,9 @@
+use std::error::Error;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use frida_core::model::Importable;
+use frida_core::model::{Importable, ImportableSerde};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportOrderItem {
@@ -34,4 +36,19 @@ pub struct ImportOrder {
 }
 
 #[async_trait]
-impl Importable for ImportOrder {}
+impl Importable for ImportOrder {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl ImportableSerde for ImportOrder {
+    fn as_json(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+        Ok(serde_json::to_string(self)?)
+    }
+
+    fn from_json(json: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        Ok(serde_json::from_str(json)?)
+    }
+}

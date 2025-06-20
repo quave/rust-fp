@@ -3,29 +3,37 @@ version: '3.8'
 services:
   importer:
     build: .
-    command: importer --config /usr/local/bin/config/importer.toml
+    command: importer --config /usr/local/bin/frida_ecom/config/${PROFILE}.yaml
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - RUST_LOG=debug
-    volumes:
-      - frida_data:/data
+      - DATABASE_URL=sqlite:///app/${PROFILE}.sqlite3
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
-      interval: 30s
-      timeout: 10s
+      interval: 5s
+      timeout: 5s
       retries: 3
 
   processor:
     build: .
-    command: processor --config /usr/local/bin/config/processor.toml
+    command: processor --config /usr/local/bin/frida_ecom/config/${PROFILE}.yaml
     environment:
       - RUST_LOG=debug
-    volumes:
-      - frida_data:/data
+      - DATABASE_URL=sqlite:///app/${PROFILE}.sqlite3
+      - REDIS_URL=redis://redis:6379
     depends_on:
-      importer:
-        condition: service_healthy
+      - redis
 
-volumes:
-  frida_data:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 3

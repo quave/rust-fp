@@ -1,65 +1,58 @@
-use clap::Parser;
+use std::{error::Error, time::Duration};
+
 use frida_core::{
-    in_memory_queue::InMemoryQueue, model::Processible, processor::Processor,
-    queue_service::QueueService, storage::Storage,
+    executable_utils::initialize_executable, model::Processible, processor::Processor,
+    queue::ProdQueue, storage::ProdCommonStorage,
 };
 use frida_ecom::{
-    config::ProcessorConfig, ecom_db_model::Order, ecom_import_model::ImportOrder,
-    rule_based_scorer::RuleBasedScorer, sqlite_order_storage::SqliteOrderStorage,
+    ecom_db_model::Order, rule_based_scorer::RuleBasedScorer,
+    sqlite_order_storage::SqliteOrderStorage,
 };
-use std::{error::Error, time::Duration};
+use log::{error, info, trace};
+use std::sync::Arc;
 use tokio::time::sleep;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Path to config file
-    #[arg(short, long, default_value = "frida_ecom/config/processor.toml")]
-    config: String,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let args = Args::parse();
-    let config = ProcessorConfig::from_file(&args.config)?;
-
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
-        .init();
+    let config = initialize_executable()?;
 
     // Create shared resources
-    let storage = SqliteOrderStorage::new(&config.database_url).await?;
-    storage.initialize_schema().await?;
-    let queue: InMemoryQueue<Order> = InMemoryQueue::new();
+    let common_storage = Arc::new(ProdCommonStorage::new(&config.common.database_url).await?);
+    info!("Storage common initialized");
+
+    let model_storage = Arc::new(SqliteOrderStorage::new(&config.common.database_url).await?);
+    info!("Storage model initialized");
+
+    let queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
+    info!("Queue initialized");
+
     let scorer = RuleBasedScorer::new();
+    info!("Scorer initialized");
 
     // Create processor
-    let processor = Processor::<
-        Order,
-        ImportOrder,
-        RuleBasedScorer,
-        SqliteOrderStorage,
-        InMemoryQueue<Order>,
-    >::new(scorer, storage, queue);
+    let processor =
+        Processor::<Order, RuleBasedScorer>::new(scorer, common_storage, model_storage, queue);
     let processor = std::sync::Arc::new(processor);
+    info!("Processor created");
 
     // Spawn processing threads
     let mut handles = vec![];
-    for i in 0..config.threads {
+    for i in 0..config.processor.threads {
         let processor = processor.clone();
-        let sleep_ms = config.sleep_ms;
+        let sleep_ms = config.processor.sleep_ms;
         let handle = tokio::spawn(async move {
-            log::info!("Starting processor thread {}", i);
+            info!("Starting processor thread {}", i);
             loop {
                 match processor.process().await {
                     Ok(Some(transaction)) => {
-                        log::info!("Processed transaction: {:?}", transaction.get_id());
+                        info!("Processed transaction: {:?}", transaction.id());
                     }
                     Ok(None) => {
-                        log::debug!("No transactions to process, sleeping...");
+                        trace!("No transactions to process, sleeping...");
                         sleep(Duration::from_millis(sleep_ms)).await;
                     }
                     Err(e) => {
-                        log::error!("Error processing transaction: {}", e);
+                        error!("Error processing transaction: {}", e);
                         sleep(Duration::from_millis(sleep_ms)).await;
                     }
                 }
@@ -67,6 +60,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         });
         handles.push(handle);
     }
+
+    info!("All processor threads spawned");
 
     // Wait for all threads
     for handle in handles {

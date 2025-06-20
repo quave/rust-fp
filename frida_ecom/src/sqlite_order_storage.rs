@@ -2,8 +2,8 @@ use crate::{ecom_db_model::*, ecom_import_model::*};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use frida_core::{
-    model::{Feature, FeatureValue, Processible, ScorerResult},
-    storage::Storage,
+    model::{Feature, FeatureValue, ModelId},
+    storage::{ImportableStorage, ProcessibleStorage},
 };
 use log::{debug, error, info};
 use serde_json::{json, Value};
@@ -15,16 +15,18 @@ pub struct SqliteOrderStorage {
     _phantom: PhantomData<Order>,
 }
 
-#[async_trait]
-impl Storage<ImportOrder, Order> for SqliteOrderStorage {
-    async fn new(database_url: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
+impl SqliteOrderStorage {
+    pub async fn new(database_url: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let pool = sqlx::SqlitePool::connect(database_url).await?;
         Ok(Self {
             pool,
             _phantom: PhantomData,
         })
     }
+}
 
+#[async_trait]
+impl ImportableStorage<ImportOrder> for SqliteOrderStorage {
     async fn initialize_schema(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let init_sql = include_str!("../../resources/init.sql");
         sqlx::query(init_sql).execute(&self.pool).await?;
@@ -34,7 +36,7 @@ impl Storage<ImportOrder, Order> for SqliteOrderStorage {
     async fn save_transaction(
         &self,
         order: &ImportOrder,
-    ) -> Result<<Order as Processible>::Id, Box<dyn Error + Send + Sync>> {
+    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
         debug!(
             "Starting to save transaction for order_number: {}",
             order.order_number
@@ -74,69 +76,11 @@ impl Storage<ImportOrder, Order> for SqliteOrderStorage {
         info!("Successfully saved order: {}", order.order_number);
         Ok(order_id)
     }
+}
 
-    async fn save_features(
-        &self,
-        order_id: &i64,
-        features: &[Feature],
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut tx = self.pool.begin().await?;
-
-        for feature in features {
-            sqlx::query(
-                r#"
-                INSERT INTO features (
-                    order_id, feature_name, feature_value_type, feature_value
-                ) VALUES (?, ?, ?, ?)
-                "#,
-            )
-            .bind(order_id)
-            .bind(&feature.name)
-            .bind(get_feature_type(&feature.value))
-            .bind(serialize_feature_value(&feature.value)?)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        tx.commit().await?;
-        Ok(())
-    }
-
-    async fn save_scores(
-        &self,
-        transaction_id: &i64,
-        scores: &Vec<ScorerResult>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut tx = self.pool.begin().await?;
-
-        // Save individual triggered rules
-        for score in scores {
-            match sqlx::query!(
-                r#"
-                INSERT INTO triggered_rules (order_id, rule_name, rule_score) 
-                VALUES (?, ?, ?)
-                "#,
-                transaction_id,
-                score.name,
-                score.score
-            )
-            .execute(&mut *tx)
-            .await
-            {
-                Ok(_) => {
-                    debug!("Successfully inserted customer data");
-                }
-                Err(e) => {
-                    error!("Failed to insert customer data: {}", e);
-                }
-            }
-        }
-
-        tx.commit().await?;
-        Ok(())
-    }
-
-    async fn get_transaction(&self, id: &i64) -> Result<Order, Box<dyn Error + Send + Sync>> {
+#[async_trait]
+impl ProcessibleStorage<Order> for SqliteOrderStorage {
+    async fn get_transaction(&self, id: ModelId) -> Result<Order, Box<dyn Error + Send + Sync>> {
         let mut tx = self.pool.begin().await?;
 
         // Get main order data
@@ -232,6 +176,33 @@ impl Storage<ImportOrder, Order> for SqliteOrderStorage {
             customer: customer,
             billing: billing,
         })
+    }
+
+    async fn save_features(
+        &self,
+        order_id: ModelId,
+        features: &[Feature],
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut tx = self.pool.begin().await?;
+
+        for feature in features {
+            sqlx::query(
+                r#"
+                INSERT INTO features (
+                    order_id, feature_name, feature_value_type, feature_value
+                ) VALUES (?, ?, ?, ?)
+                "#,
+            )
+            .bind(order_id)
+            .bind(&feature.name)
+            .bind(get_feature_type(&feature.value))
+            .bind(serialize_feature_value(&feature.value)?)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 }
 
@@ -393,9 +364,12 @@ impl SqliteOrderStorage {
         .fetch_all(&self.pool)
         .await?
         .into_iter()
-        .map(|row| Feature {
-            name: row.feature_name,
-            value: deserialize_feature_value(&row.feature_value).unwrap(), // You'll need to implement this
+        .map(|row| {
+            let value: FeatureValue = deserialize_feature_value(&row.feature_value).unwrap();
+            Feature {
+                name: row.feature_name,
+                value: Box::new(value),
+            }
         })
         .collect();
 

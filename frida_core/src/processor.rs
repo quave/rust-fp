@@ -1,54 +1,52 @@
 use crate::{
-    model::{Importable, Processible},
-    queue_service::QueueService,
+    model::Processible,
+    queue::QueueService,
     scorer::Scorer,
-    storage::Storage,
+    storage::{CommonStorage, ProcessibleStorage},
 };
-use log::{debug, info, warn};
-use std::{error::Error, marker::PhantomData};
+use log::{debug, info, trace, warn};
+use std::{error::Error, sync::Arc};
 
-pub struct Processor<
-    T: Processible,
-    IT: Importable,
-    S: Scorer,
-    ST: Storage<IT, T>,
-    Q: QueueService<T>,
-> {
+pub struct Processor<P: Processible, S: Scorer> {
     scorer: S,
-    storage: ST,
-    queue: Q,
-    _phantom_t: PhantomData<T>,
-    _phantom_it: PhantomData<IT>,
+    common_storage: Arc<dyn CommonStorage>,
+    processible_storage: Arc<dyn ProcessibleStorage<P>>,
+    queue: Arc<dyn QueueService<P>>,
 }
 
-impl<T, IT, S, ST, Q> Processor<T, IT, S, ST, Q>
+impl<P, S> Processor<P, S>
 where
-    T: Processible,
-    IT: Importable,
+    P: Processible,
     S: Scorer,
-    ST: Storage<IT, T>,
-    Q: QueueService<T>,
 {
-    pub fn new(scorer: S, storage: ST, queue: Q) -> Self {
+    pub fn new(
+        scorer: S,
+        common_storage: Arc<dyn CommonStorage>,
+        processible_storage: Arc<dyn ProcessibleStorage<P>>,
+        queue: Arc<dyn QueueService<P>>,
+    ) -> Self {
         info!("Initializing new Processor");
         Self {
             scorer,
-            storage,
+            common_storage,
+            processible_storage,
             queue,
-            _phantom_t: PhantomData,
-            _phantom_it: PhantomData,
         }
     }
 
-    pub async fn process(&self) -> Result<Option<T>, Box<dyn Error + Send + Sync>> {
-        debug!("Starting processing cycle");
+    pub async fn process(&self) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
+        trace!("Starting processing cycle");
 
         // Try to get a transaction from the queue
         if let Some(transaction_id) = self.queue.dequeue().await? {
             info!("Processing transaction with ID: {:?}", &transaction_id);
 
             // Get transaction details
-            let transaction = match self.storage.get_transaction(&transaction_id).await {
+            let transaction = match self
+                .processible_storage
+                .get_transaction(transaction_id)
+                .await
+            {
                 Ok(t) => t,
                 Err(e) => {
                     warn!("Failed to get transaction {}: {}", transaction_id, e);
@@ -58,10 +56,10 @@ where
 
             // Extract and save features
             debug!("Extracting features for transaction {:?}", &transaction_id);
-            let features = transaction.extract_features().await;
+            let features = transaction.extract_features();
             if let Err(e) = self
-                .storage
-                .save_features(&transaction.get_id(), &features)
+                .processible_storage
+                .save_features(transaction.id(), &features)
                 .await
             {
                 warn!("Failed to save features for {}: {}", transaction_id, e);
@@ -73,8 +71,8 @@ where
             debug!("Scoring transaction {:?}", transaction_id);
             let result = self.scorer.score(features).await;
             if let Err(e) = self
-                .storage
-                .save_scores(&transaction.get_id(), &result)
+                .common_storage
+                .save_scores(transaction.id(), &result)
                 .await
             {
                 warn!("Failed to save scores for {}: {}", transaction_id, e);
@@ -87,7 +85,7 @@ where
 
             Ok(Some(transaction))
         } else {
-            debug!("No transactions in queue");
+            trace!("No transactions in queue");
             Ok(None)
         }
     }

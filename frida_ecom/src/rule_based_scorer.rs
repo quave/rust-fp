@@ -18,19 +18,20 @@ impl RuleBasedScorer {
     fn add_default_rules(&mut self) {
         // Example rule: High total amount
         self.rules.push(Box::new(|features| {
-            if let Some(Feature {
-                value: FeatureValue::Double(total),
-                ..
-            }) = features.iter().find(|f| f.name == "order_total")
-            {
-                if *total > 1000.0 {
-                    return Some(ScorerResult {
-                        score: 70.0,
-                        name: "High order total".to_string(),
-                    });
+            match features.iter().find(|f| f.name == "order_total") {
+                Some(Feature { value, .. }) => {
+                    if let FeatureValue::Double(total) = **value {
+                        if total > 1000.0 {
+                            return Some(ScorerResult {
+                                score: 70.0,
+                                name: "High order total".to_string(),
+                            });
+                        }
+                    }
+                    None
                 }
+                None => None,
             }
-            None
         }));
 
         // Add more rules...

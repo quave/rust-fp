@@ -3,3 +3,4 @@
 *.swp
 *.sqlite3
 *.db
+.sqlx/
