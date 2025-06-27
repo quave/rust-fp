@@ -7,7 +7,7 @@ use common::test_helpers::truncate_processing_tables;
 use serde_json::json;
 use std::error::Error;
 
-use super::setup::{get_test_storage, save_raw_features};
+use super::setup::{get_test_storage, save_raw_features, create_test_transaction};
 
 // Basic feature storage tests
 #[tokio::test]
@@ -19,7 +19,7 @@ async fn test_save_and_get_features() -> Result<(), Box<dyn Error + Send + Sync>
     truncate_processing_tables(&pool).await?;
     
     // Create a transaction
-    let transaction_id = storage.insert_transaction().await?;
+    let transaction_id = create_test_transaction(&storage).await?;
     
     // Create test features
     let features = vec![
@@ -121,7 +121,7 @@ async fn test_save_features_with_complex_values() -> Result<(), Box<dyn Error + 
     truncate_processing_tables(&pool).await?;
     
     // Create a transaction
-    let transaction_id = storage.insert_transaction().await?;
+    let transaction_id = create_test_transaction(&storage).await?;
     let now = Utc::now();
     
     // First create the row with simple_features
@@ -201,7 +201,7 @@ async fn test_save_features_with_invalid_array_types() -> Result<(), Box<dyn Err
     // Clean up any existing test data
     truncate_processing_tables(&pool).await?;
     
-    let transaction_id = storage.insert_transaction().await?;
+    let transaction_id = create_test_transaction(&storage).await?;
 
     // Test case 1: Array with mixed types (should fail)
     let invalid_mixed_array = json!([{
@@ -244,7 +244,7 @@ async fn test_save_features_with_invalid_array_types() -> Result<(), Box<dyn Err
 #[serial_test::serial]
 async fn test_save_features_with_invalid_schema() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (_, storage) = get_test_storage().await?;
-    let transaction_id = storage.insert_transaction().await?;
+    let transaction_id = create_test_transaction(&storage).await?;
 
     // Create features with invalid schema
     let invalid_features = vec![

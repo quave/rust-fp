@@ -158,75 +158,46 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
     assert_eq!(tx1.path_matchers.len(), 1, "Should have 1 path matcher for root node");
     
     // Clean up before next test
-    sqlx::query!("TRUNCATE TABLE match_node_transactions CASCADE").execute(&pool).await?;
-    sqlx::query!("TRUNCATE TABLE match_node CASCADE").execute(&pool).await?;
-    sqlx::query!("TRUNCATE TABLE transactions CASCADE").execute(&pool).await?;
+    common::test_helpers::truncate_connection_test_tables(&pool).await?;
     
     // SECTION 2: Test max_depth parameter
     // Set up transactions in a chain
-    sqlx::query!(
-        r#"
-        INSERT INTO transactions (id, created_at) VALUES 
-        (1, '2024-01-01'),
-        (2, '2024-01-02'),
-        (3, '2024-01-03'),
-        (4, '2024-01-04'),
-        (5, '2024-01-05'),
-        (6, '2024-01-06'),
-        (7, '2024-01-07'),
-        (8, '2024-01-08'),
-        (9, '2024-01-09'),
-        (10, '2024-01-10')
-        "#
-    )
-    .execute(&pool)
-    .await?;
+    let transaction_data = vec![
+        (1, "2024-01-01"),
+        (2, "2024-01-02"),
+        (3, "2024-01-03"),
+        (4, "2024-01-04"),
+        (5, "2024-01-05"),
+        (6, "2024-01-06"),
+        (7, "2024-01-07"),
+        (8, "2024-01-08"),
+        (9, "2024-01-09"),
+        (10, "2024-01-10"),
+    ];
+    common::test_helpers::create_test_transactions_batch(&pool, &transaction_data).await?;
     
     // Create match nodes for a chain
-    sqlx::query!(
-        r#"
-        INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
-        (1, 'link.1-2', 'chain1', 100, 0),
-        (2, 'link.2-3', 'chain2', 100, 0),
-        (3, 'link.3-4', 'chain3', 100, 0),
-        (4, 'link.4-5', 'chain4', 100, 0),
-        (5, 'link.5-6', 'chain5', 100, 0),
-        (6, 'link.6-7', 'chain6', 100, 0),
-        (7, 'link.7-8', 'chain7', 100, 0),
-        (8, 'link.8-9', 'chain8', 100, 0),
-        (9, 'link.9-10', 'chain9', 100, 0)
-        "#
-    )
-    .execute(&pool)
-    .await?;
+    let node_data = vec![
+        (1, "link.1-2", "chain1", 100, 0),
+        (2, "link.2-3", "chain2", 100, 0),
+        (3, "link.3-4", "chain3", 100, 0),
+        (4, "link.4-5", "chain4", 100, 0),
+        (5, "link.5-6", "chain5", 100, 0),
+        (6, "link.6-7", "chain6", 100, 0),
+        (7, "link.7-8", "chain7", 100, 0),
+        (8, "link.8-9", "chain8", 100, 0),
+        (9, "link.9-10", "chain9", 100, 0),
+    ];
+    common::test_helpers::create_match_nodes_batch(&pool, &node_data).await?;
     
     // Connect transactions in a chain (one by one to avoid conflicts)
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 2)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 3)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 3)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 4)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (4, 4)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (4, 5)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 5)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 6)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (6, 6)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (6, 7)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (7, 7)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (7, 8)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (8, 8)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (8, 9)"#).execute(&pool).await?;
-    
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (9, 9)"#).execute(&pool).await?;
-    sqlx::query!(r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (9, 10)"#).execute(&pool).await?;
+    let connections = vec![
+        (1, 1), (1, 2), (2, 2), (2, 3), (3, 3), (3, 4), (4, 4), (4, 5),
+        (5, 5), (5, 6), (6, 6), (6, 7), (7, 7), (7, 8), (8, 8), (8, 9), (9, 9), (9, 10)
+    ];
+    for (node_id, transaction_id) in connections {
+        common::test_helpers::link_transaction_to_match_node(&pool, node_id, transaction_id).await?;
+    }
     
     // Test depth-limited query (max_depth=2)
     let depth_limited = storage.find_connected_transactions(1, Some(2), None, None, None, None).await?;
@@ -254,61 +225,24 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     truncate_processing_tables(&pool).await?;
     
     // Create transactions
-    let tx1 = storage.insert_transaction().await?;
-    let tx2 = storage.insert_transaction().await?;
-    let tx3 = storage.insert_transaction().await?;
+    let tx1 = create_test_transaction(&storage).await?;
+    let tx2 = create_test_transaction(&storage).await?;
+    let tx3 = create_test_transaction(&storage).await?;
 
     // Setup matcher nodes
-    let email_node_id = sqlx::query!(
-        r#"
-        INSERT INTO match_node (matcher, value, confidence, importance)
-        VALUES ('email', 'test@example.com', 90, 80)
-        RETURNING id
-        "#
-    )
-    .fetch_one(&pool)
-    .await?
-    .id;
+    let email_node_id = common::test_helpers::create_test_match_node(
+        &pool, "email", "test@example.com", 90, 80
+    ).await?;
 
-    let phone_node_id = sqlx::query!(
-        r#"
-        INSERT INTO match_node (matcher, value, confidence, importance)
-        VALUES ('phone', '1234567890', 85, 75)
-        RETURNING id
-        "#
-    )
-    .fetch_one(&pool)
-    .await?
-    .id;
+    let phone_node_id = common::test_helpers::create_test_match_node(
+        &pool, "phone", "1234567890", 85, 75
+    ).await?;
 
     // Connect transactions via match nodes using the correct node IDs
-    sqlx::query!(
-        r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES ($1, $2)"#, 
-        email_node_id, tx1
-    )
-    .execute(&pool)
-    .await?;
-    
-    sqlx::query!(
-        r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES ($1, $2)"#, 
-        email_node_id, tx2
-    )
-    .execute(&pool)
-    .await?;
-    
-    sqlx::query!(
-        r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES ($1, $2)"#, 
-        phone_node_id, tx1
-    )
-    .execute(&pool)
-    .await?;
-    
-    sqlx::query!(
-        r#"INSERT INTO match_node_transactions (node_id, transaction_id) VALUES ($1, $2)"#, 
-        phone_node_id, tx3
-    )
-    .execute(&pool)
-    .await?;
+    common::test_helpers::link_transaction_to_match_node(&pool, email_node_id, tx1).await?;
+    common::test_helpers::link_transaction_to_match_node(&pool, email_node_id, tx2).await?;
+    common::test_helpers::link_transaction_to_match_node(&pool, phone_node_id, tx1).await?;
+    common::test_helpers::link_transaction_to_match_node(&pool, phone_node_id, tx3).await?;
 
     // Get direct connections for tx1
     let connections = storage.get_direct_connections(tx1).await?;
@@ -342,7 +276,7 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     assert_eq!(connections[0].matcher, "email");
     
     // Get direct connections for an unconnected transaction
-    let tx4 = storage.insert_transaction().await?;
+    let tx4 = create_test_transaction(&storage).await?;
     let connections = storage.get_direct_connections(tx4).await?;
     assert_eq!(connections.len(), 0, "Unconnected transaction should have no connections");
     

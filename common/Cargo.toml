@@ -6,24 +6,24 @@ authors.workspace = true
 
 [features]
 default = []
-test-helpers = ["async-sqlx"]
-async-sqlx = ["dep:sqlx"]
-processing-mocks = ["async-sqlx"]
+test-helpers = []
+processing-mocks = ["mockall"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yml = { workspace = true }
+yaml-rust2 = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
-uuid = { workspace = true }
 tracing = { workspace = true }
 once_cell = { workspace = true }
 thiserror = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true }
-
-# Optional dependencies for test helpers
-sqlx = { workspace = true, optional = true }
+sqlx = { workspace = true }
+async-trait = { workspace = true }
+mockall = { workspace = true, optional = true }
 
 [lib]
 name = "common"
@@ -31,4 +31,5 @@ path = "src/lib.rs"
 
 [dev-dependencies]
 tokio-test = "0.4.4"
+mockall = { workspace = true }
 

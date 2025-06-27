@@ -1,6 +1,7 @@
 use std::error::Error;
 use ecom::ecom_import_model::{ImportOrder, ImportOrderItem, ImportCustomerData, ImportBillingData};
-use processing::storage::{ImportableStorage, WebStorage};
+
+mod test_helpers;
 
 /// Create a test order for verification purposes
 fn create_test_order(order_number: &str) -> ImportOrder {
@@ -36,28 +37,27 @@ fn create_test_order(order_number: &str) -> ImportOrder {
 async fn test_order_storage_sequential_verification() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("\n=== Running ecom order storage verification test ===\n");
     
-    // Create a fresh storage instance for this verification test
-    use common::test_helpers::get_test_database_url;
-    let storage = ecom::ecom_order_storage::EcomOrderStorage::new(&get_test_database_url()).await?;
+    // Create a test storage wrapper that ensures unique transaction IDs
+    let test_storage = test_helpers::TestEcomOrderStorage::new().await?;
     
     // Generate unique test prefix for this verification run
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
     let test_prefix = format!("VERIFY-{}", timestamp);
     
-    println!("✅ Storage instance created successfully");
+    println!("✅ Test storage wrapper created successfully");
     println!("✅ Using unique test prefix: {}", test_prefix);
     
     // Verify that we can run basic operations without conflicts
     let order_number = format!("{}-BASIC-TEST", test_prefix);
     let test_order = create_test_order(&order_number);
     
-    // Test save operation
-    let tx_id = storage.save_transaction(&test_order).await?;
-    println!("✅ Successfully saved transaction with ID: {}", tx_id);
+    // Test save operation using unique ID generation
+    let tx_id = test_storage.save_test_transaction(&test_order).await?;
+    println!("✅ Successfully saved transaction with unique ID: {}", tx_id);
     
     // Test retrieve operation
-    let retrieved = storage.get_transaction(tx_id).await?;
+    let retrieved = test_storage.get_transaction(tx_id).await?;
     println!("✅ Successfully retrieved transaction: {}", retrieved.order.order_number);
     
     // Verify data matches
@@ -65,18 +65,7 @@ async fn test_order_storage_sequential_verification() -> Result<(), Box<dyn Erro
     assert!(retrieved.customer.name.contains("Test Customer"));
     
     // Clean up this verification test data
-    let mut tx = storage.pool.begin().await?;
-    sqlx::query("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)")
-        .bind(tx_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM customers WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)")
-        .bind(tx_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM billing_data WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)")
-        .bind(tx_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM orders WHERE transaction_id = $1")
-        .bind(tx_id).execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM transactions WHERE id = $1")
-        .bind(tx_id).execute(&mut *tx).await?;
-    tx.commit().await?;
+    test_storage.cleanup_test_transaction(tx_id).await?;
     
     println!("✅ Cleanup completed successfully");
     println!("\n=== Order storage verification test completed successfully ===");

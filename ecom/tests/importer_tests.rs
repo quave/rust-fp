@@ -4,7 +4,7 @@ use axum::{
 };
 use tower::util::ServiceExt;
 use processing::executable_utils::{health_check, import_transaction};
-use common::test_helpers::{setup_test_environment, MockQueue, get_test_database_url, truncate_processing_tables};
+use common::test_helpers::{setup_test_environment, get_test_database_url};
 use processing::{importer::Importer, queue::QueueService};
 use ecom::{
     ecom_order_storage::EcomOrderStorage,
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::error::Error;
 use tokio::sync::OnceCell;
 use async_trait::async_trait;
-use sqlx::PgPool;
+use mockall::mock;
 
 static SETUP: OnceCell<()> = OnceCell::const_new();
 
@@ -25,33 +25,15 @@ async fn ensure_setup() {
     }).await;
 }
 
-// Simple wrapper to adapt MockQueue to QueueService trait
-// This is minimal adapter code since MockQueue already has the right interface
-struct MockQueueAdapter {
-    inner: MockQueue,
-}
+// Direct mockall implementation - much cleaner than custom adapter!
+mock! {
+    QueueService {}
 
-impl MockQueueAdapter {
-    fn new() -> Self {
-        Self {
-            inner: MockQueue::new(),
-        }
-    }
-}
-
-#[async_trait]
-impl QueueService for MockQueueAdapter {
-    async fn fetch_next(&self) -> Result<Option<i64>, Box<dyn Error + Send + Sync>> {
-        let result = self.inner.fetch_next().await?;
-        Ok(result.map(|id| id as i64))
-    }
-
-    async fn mark_processed(&self, id: i64) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.inner.mark_processed(id as u64).await
-    }
-
-    async fn enqueue(&self, id: i64) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.inner.enqueue(id as u64).await
+    #[async_trait]
+    impl QueueService for QueueService {
+        async fn fetch_next(&self) -> Result<Option<i64>, Box<dyn Error + Send + Sync>>;
+        async fn mark_processed(&self, tx_id: i64) -> Result<(), Box<dyn Error + Send + Sync>>;
+        async fn enqueue(&self, tx_id: i64) -> Result<(), Box<dyn Error + Send + Sync>>;
     }
 }
 
@@ -61,11 +43,21 @@ async fn test_import_endpoint() -> Result<(), Box<dyn Error + Send + Sync>> {
     
     // Clean up any existing test data first
     let database_url = get_test_database_url();
-    let pool = PgPool::connect(&database_url).await?;
-    truncate_processing_tables(&pool).await?;
+    let pool = common::test_helpers::create_test_pool().await?;
+    common::test_helpers::truncate_processing_tables(&pool).await?;
     
     let storage = Arc::new(EcomOrderStorage::new(&database_url).await?);
-    let queue = Arc::new(MockQueueAdapter::new());
+    
+    // Create mockall-based queue service with basic expectations
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next()
+        .returning(|| Ok(None)); // Empty queue for this test
+    queue.expect_mark_processed()
+        .returning(|_| Ok(()));
+    queue.expect_enqueue()
+        .returning(|_| Ok(()));
+    
+    let queue = Arc::new(queue);
 
     // Create test app with centralized test utilities
     let app = Router::new()

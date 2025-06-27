@@ -39,7 +39,7 @@ pub struct Config {
 impl Config {
     pub fn load(config_path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let contents = fs::read_to_string(config_path)?;
-        let config = serde_yaml::from_str(&contents)?;
+        let config = serde_yml::from_str(&contents)?;
 
         Ok(config)
     }

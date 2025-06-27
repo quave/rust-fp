@@ -5,7 +5,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::error::Error;
+
+
 
 // Global counter for truly unique test identifiers across parallel tests
 static GLOBAL_TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -82,12 +83,12 @@ pub fn get_test_in_memory_database_url() -> String {
 // CENTRALIZED MOCK IMPLEMENTATIONS
 // =============================================================================
 
-#[cfg(feature = "async-sqlx")]
 pub mod mocks {
-    use std::collections::{VecDeque, HashMap};
+    use std::collections::VecDeque;
     use std::sync::{Mutex, Arc};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::error::Error;
+    use crate::test_helpers::*;
+    use crate::test_assert_eq;
 
     // =============================================================================
     // QUEUE MOCKS
@@ -129,7 +130,7 @@ pub mod mocks {
         }
 
         /// Add an item to the queue
-        pub async fn enqueue(&self, item: u64) -> Result<(), TestError> {
+        pub async fn enqueue(&self, item: u64) -> TestResult<()> {
             if self.should_fail {
                 return Err(TestError::mock_failure("Mock queue failure"));
             }
@@ -138,7 +139,7 @@ pub mod mocks {
         }
 
         /// Get the next item from the queue
-        pub async fn fetch_next(&self) -> Result<Option<u64>, TestError> {
+        pub async fn fetch_next(&self) -> TestResult<Option<u64>> {
             if self.should_fail {
                 return Err(TestError::mock_failure("Mock queue failure"));
             }
@@ -151,7 +152,7 @@ pub mod mocks {
         }
 
         /// Mark an item as processed (mock implementation)
-        pub async fn mark_processed(&self, _item: u64) -> Result<(), TestError> {
+        pub async fn mark_processed(&self, _item: u64) -> TestResult<()> {
             if self.should_fail {
                 return Err(TestError::mock_failure("Mock queue failure"));
             }
@@ -164,87 +165,78 @@ pub mod mocks {
     // STORAGE MOCKS
     // =============================================================================
 
-    /// Test data factory for common model objects
-    /// 
-    /// This struct provides factory methods to create consistent test data
-    /// across different test suites.
-    pub struct TestDataFactory;
 
-    impl TestDataFactory {
-        /// Create a basic feature for testing
-        pub fn create_feature(name: &str, value: i32) -> TestFeature {
-            TestFeature {
-                name: name.to_string(),
-                int_value: Some(value),
-                string_value: None,
-            }
+
+    // =============================================================================
+    // HELPER FUNCTIONS (previously TestDataFactory methods)
+    // =============================================================================
+
+    pub fn create_feature(name: &str, value: i32) -> TestFeature {
+        TestFeature {
+            name: name.to_string(),
+            int_value: Some(value),
+            string_value: None,
         }
+    }
 
-        /// Create a string feature for testing
-        pub fn create_string_feature(name: &str, value: &str) -> TestFeature {
-            TestFeature {
-                name: name.to_string(),
-                int_value: None,
-                string_value: Some(value.to_string()),
-            }
+    pub fn create_string_feature(name: &str, value: &str) -> TestFeature {
+        TestFeature {
+            name: name.to_string(),
+            int_value: None,
+            string_value: Some(value.to_string()),
         }
+    }
 
-        /// Create a matching field for testing
-        pub fn create_matching_field(matcher: &str, value: &str) -> TestMatchingField {
-            TestMatchingField {
-                matcher: matcher.to_string(),
-                value: value.to_string(),
-            }
+    pub fn create_matching_field(matcher: &str, value: &str) -> TestMatchingField {
+        TestMatchingField {
+            matcher: matcher.to_string(),
+            value: value.to_string(),
         }
+    }
 
-        /// Create a test scorer result
-        pub fn create_scorer_result(name: &str, score: i32) -> TestScorerResult {
-            TestScorerResult {
-                name: name.to_string(),
-                score,
-            }
+    pub fn create_scorer_result(name: &str, score: i32) -> TestScorerResult {
+        TestScorerResult {
+            name: name.to_string(),
+            score,
         }
+    }
 
-        /// Create a test transaction
-        pub fn create_transaction(id: u64) -> TestTransaction {
-            TestTransaction {
-                id,
-                features: vec![
-                    Self::create_feature("test_feature", 42),
-                    Self::create_string_feature("test_string", "test_value"),
-                ],
-                matching_fields: vec![
-                    Self::create_matching_field("test_matcher", "test_value"),
-                ],
-            }
+    pub fn create_transaction(id: u64) -> TestTransaction {
+        TestTransaction {
+            id,
+            features: vec![
+                create_feature("test_feature", 42),
+                create_string_feature("test_string", "test_value"),
+            ],
+            matching_fields: vec![
+                create_matching_field("test_matcher", "test_value"),
+            ],
         }
+    }
 
-        /// Create a high-value test transaction
-        pub fn create_high_value_transaction(id: u64) -> TestTransaction {
-            TestTransaction {
-                id,
-                features: vec![
-                    Self::create_feature("value", 10000),
-                    Self::create_string_feature("type", "high_value"),
-                ],
-                matching_fields: vec![
-                    Self::create_matching_field("value_matcher", "high"),
-                ],
-            }
+    pub fn create_high_value_transaction(id: u64) -> TestTransaction {
+        TestTransaction {
+            id,
+            features: vec![
+                create_feature("value", 10000),
+                create_string_feature("type", "high_value"),
+            ],
+            matching_fields: vec![
+                create_matching_field("value_matcher", "high"),
+            ],
         }
+    }
 
-        /// Create a low-value test transaction
-        pub fn create_low_value_transaction(id: u64) -> TestTransaction {
-            TestTransaction {
-                id,
-                features: vec![
-                    Self::create_feature("value", 100),
-                    Self::create_string_feature("type", "low_value"),
-                ],
-                matching_fields: vec![
-                    Self::create_matching_field("value_matcher", "low"),
-                ],
-            }
+    pub fn create_low_value_transaction(id: u64) -> TestTransaction {
+        TestTransaction {
+            id,
+            features: vec![
+                create_feature("value", 100),
+                create_string_feature("type", "low_value"),
+            ],
+            matching_fields: vec![
+                create_matching_field("value_matcher", "low"),
+            ],
         }
     }
 
@@ -284,29 +276,29 @@ pub mod mocks {
 
     impl TestTransaction {
         pub fn new(id: u64) -> Self {
-            TestDataFactory::create_transaction(id)
+            create_transaction(id)
         }
 
         pub fn high_value(id: u64) -> Self {
-            TestDataFactory::create_high_value_transaction(id)
+            create_high_value_transaction(id)
         }
 
         pub fn low_value(id: u64) -> Self {
-            TestDataFactory::create_low_value_transaction(id)
+            create_low_value_transaction(id)
         }
 
         pub fn with_features(id: u64, features: Vec<TestFeature>) -> Self {
             Self {
                 id,
                 features,
-                matching_fields: vec![TestDataFactory::create_matching_field("default", "test")],
+                matching_fields: vec![create_matching_field("default", "test")],
             }
         }
 
         pub fn with_matching_fields(id: u64, matching_fields: Vec<TestMatchingField>) -> Self {
             Self {
                 id,
-                features: vec![TestDataFactory::create_feature("default", 1)],
+                features: vec![create_feature("default", 1)],
                 matching_fields,
             }
         }
@@ -354,18 +346,18 @@ pub mod mocks {
         }
 
         pub fn high_value_scorer() -> Self {
-            Self::new(vec![TestDataFactory::create_scorer_result("high_value", 100)])
+            Self::new(vec![create_scorer_result("high_value", 100)])
         }
 
         pub fn low_value_scorer() -> Self {
-            Self::new(vec![TestDataFactory::create_scorer_result("low_value", 10)])
+            Self::new(vec![create_scorer_result("low_value", 10)])
         }
 
         pub fn was_called(&self) -> bool {
             self.called.load(Ordering::Relaxed)
         }
 
-        pub async fn score(&self, features: Vec<TestFeature>) -> Result<Vec<TestScorerResult>, TestError> {
+        pub async fn score(&self, features: Vec<TestFeature>) -> TestResult<Vec<TestScorerResult>> {
             self.called.store(true, Ordering::Relaxed);
             
             if self.should_fail {
@@ -380,151 +372,27 @@ pub mod mocks {
         }
     }
 
-    /// Mock storage with configurable behavior and comprehensive call tracking
+    /// Simple mock storage for basic testing scenarios
+    /// For complex storage testing, use trait-specific mocks with mockall
     #[derive(Debug, Clone)]
     pub struct MockStorage {
         pub transaction_id: u64,
         pub features: Vec<TestFeature>,
-        pub matching_fields: Vec<TestMatchingField>,
-        pub scores: Vec<TestScorerResult>,
-        
-        // Call tracking
-        pub save_features_called: Arc<AtomicBool>,
-        pub save_scores_called: Arc<AtomicBool>,
-        pub save_matching_fields_called: Arc<AtomicBool>,
-        pub get_features_called: Arc<AtomicBool>,
-        
-        // Behavior configuration
-        pub should_fail_save_features: bool,
-        pub should_fail_save_scores: bool,
-        pub should_fail_save_matching_fields: bool,
-        pub should_fail_get_features: bool,
-        
-        // Custom configurations
-        pub matcher_configs: HashMap<String, String>,
     }
 
     impl MockStorage {
         pub fn new(transaction_id: u64) -> Self {
             Self {
                 transaction_id,
-                features: vec![TestDataFactory::create_feature("default", 1)],
-                matching_fields: vec![TestDataFactory::create_matching_field("default", "test")],
-                scores: vec![TestDataFactory::create_scorer_result("default", 50)],
-                save_features_called: Arc::new(AtomicBool::new(false)),
-                save_scores_called: Arc::new(AtomicBool::new(false)),
-                save_matching_fields_called: Arc::new(AtomicBool::new(false)),
-                get_features_called: Arc::new(AtomicBool::new(false)),
-                should_fail_save_features: false,
-                should_fail_save_scores: false,
-                should_fail_save_matching_fields: false,
-                should_fail_get_features: false,
-                matcher_configs: HashMap::new(),
+                features: vec![create_feature("default", 1)],
             }
         }
 
         pub fn with_features(transaction_id: u64, features: Vec<TestFeature>) -> Self {
-            let mut mock = Self::new(transaction_id);
-            mock.features = features;
-            mock
-        }
-
-        pub fn with_scores(transaction_id: u64, scores: Vec<TestScorerResult>) -> Self {
-            let mut mock = Self::new(transaction_id);
-            mock.scores = scores;
-            mock
-        }
-
-        pub fn with_matcher_configs(transaction_id: u64, configs: HashMap<String, String>) -> Self {
-            let mut mock = Self::new(transaction_id);
-            mock.matcher_configs = configs;
-            mock
-        }
-
-        pub fn failing_save_features(transaction_id: u64) -> Self {
-            let mut mock = Self::new(transaction_id);
-            mock.should_fail_save_features = true;
-            mock
-        }
-
-        pub fn failing_save_scores(transaction_id: u64) -> Self {
-            let mut mock = Self::new(transaction_id);
-            mock.should_fail_save_scores = true;
-            mock
-        }
-
-        // Call tracking methods
-        pub fn was_save_features_called(&self) -> bool {
-            self.save_features_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_save_scores_called(&self) -> bool {
-            self.save_scores_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_save_matching_fields_called(&self) -> bool {
-            self.save_matching_fields_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_get_features_called(&self) -> bool {
-            self.get_features_called.load(Ordering::Relaxed)
-        }
-
-        // Storage operation methods (these would be adapted to specific storage traits)
-        pub async fn save_features(&self, tx_id: u64, features: &[TestFeature]) -> Result<(), TestError> {
-            self.save_features_called.store(true, Ordering::Relaxed);
-            
-            if self.should_fail_save_features {
-                return Err(TestError::mock_failure("Mock storage save_features failure"));
+            Self {
+                transaction_id,
+                features,
             }
-
-            test_assert_eq!(tx_id, self.transaction_id, "Transaction ID mismatch");
-            
-            if !self.features.is_empty() {
-                test_assert_eq!(features, &self.features, "Features don't match expected");
-            }
-            
-            Ok(())
-        }
-
-        pub async fn save_scores(&self, tx_id: u64, scores: &[TestScorerResult]) -> Result<(), TestError> {
-            self.save_scores_called.store(true, Ordering::Relaxed);
-            
-            if self.should_fail_save_scores {
-                return Err(TestError::mock_failure("Mock storage save_scores failure"));
-            }
-
-            test_assert_eq!(tx_id, self.transaction_id, "Transaction ID mismatch");
-            test_assert_eq!(scores.len(), self.scores.len(), "Score count mismatch");
-            
-            Ok(())
-        }
-
-        pub async fn save_matching_fields(&self, tx_id: u64, fields: &[TestMatchingField]) -> Result<(), TestError> {
-            self.save_matching_fields_called.store(true, Ordering::Relaxed);
-            
-            if self.should_fail_save_matching_fields {
-                return Err(TestError::mock_failure("Mock storage save_matching_fields failure"));
-            }
-
-            test_assert_eq!(tx_id, self.transaction_id, "Transaction ID mismatch");
-            
-            if !fields.is_empty() {
-                test_assert_eq!(fields, &self.matching_fields, "Matching fields don't match expected");
-            }
-            
-            Ok(())
-        }
-
-        pub async fn get_features(&self, tx_id: u64) -> Result<Vec<TestFeature>, TestError> {
-            self.get_features_called.store(true, Ordering::Relaxed);
-            
-            if self.should_fail_get_features {
-                return Err(TestError::mock_failure("Mock storage get_features failure"));
-            }
-
-            test_assert_eq!(tx_id, self.transaction_id, "Transaction ID mismatch");
-            Ok(self.features.clone())
         }
     }
 
@@ -565,7 +433,7 @@ pub mod mocks {
             self.get_called.load(Ordering::Relaxed)
         }
 
-        pub async fn get_processible(&self, tx_id: u64) -> Result<TestTransaction, TestError> {
+        pub async fn get_processible(&self, tx_id: u64) -> TestResult<TestTransaction> {
             self.get_called.store(true, Ordering::Relaxed);
 
             if self.should_fail {
@@ -583,342 +451,25 @@ pub mod mocks {
     }
 }
 
-#[cfg(feature = "async-sqlx")]
 pub use mocks::*;
 
 // =============================================================================
-// PROCESSING-SPECIFIC MOCKS
+// PROCESSING-SPECIFIC MOCKS AND ADAPTERS
 // =============================================================================
 
 /// Processing-specific mock implementations that adapt to actual processing types
 /// This module provides mocks that implement the actual traits used in the processing crate
-#[cfg(feature = "processing-mocks")]
-pub mod processing_mocks {
-    use super::mocks::*;
-    use std::sync::{Arc};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::collections::HashMap;
-    use std::error::Error;
+// Removed empty processing_mocks module - YAGNI violation eliminated
 
-    // These would need to be imported from the processing crate when used
-    // For now, we'll define minimal trait signatures that match the processing crate
-
-    /// Mock implementation of CommonStorage trait from processing crate
-    #[derive(Debug, Clone)]
-    pub struct MockCommonStorage {
-        pub transaction_id: i64,
-        pub features: Vec<TestFeature>,
-        pub matching_fields: Vec<TestMatchingField>,
-        pub scores: Vec<TestScorerResult>,
-        
-        // Call tracking
-        pub save_features_called: Arc<AtomicBool>,
-        pub save_scores_called: Arc<AtomicBool>,
-        pub save_matching_fields_called: Arc<AtomicBool>,
-        pub get_features_called: Arc<AtomicBool>,
-        
-        // Behavior configuration
-        pub should_fail_save_features: bool,
-        pub should_fail_save_scores: bool,
-        pub should_fail_save_matching_fields: bool,
-        pub should_fail_get_features: bool,
-        
-        // Custom configurations
-        pub matcher_configs: HashMap<String, String>,
-    }
-
-    impl MockCommonStorage {
-        pub fn new(transaction_id: i64, features: Vec<TestFeature>, scores: Vec<TestScorerResult>) -> Self {
-            Self {
-                transaction_id,
-                features,
-                scores,
-                matching_fields: vec![TestDataFactory::create_matching_field("default", "test")],
-                save_features_called: Arc::new(AtomicBool::new(false)),
-                save_scores_called: Arc::new(AtomicBool::new(false)),
-                save_matching_fields_called: Arc::new(AtomicBool::new(false)),
-                get_features_called: Arc::new(AtomicBool::new(false)),
-                should_fail_save_features: false,
-                should_fail_save_scores: false,
-                should_fail_save_matching_fields: false,
-                should_fail_get_features: false,
-                matcher_configs: HashMap::new(),
-            }
-        }
-
-        pub fn with_matcher_configs(
-            transaction_id: i64, 
-            features: Vec<TestFeature>, 
-            scores: Vec<TestScorerResult>, 
-            matcher_configs: HashMap<String, String>
-        ) -> Self {
-            let mut mock = Self::new(transaction_id, features, scores);
-            mock.matcher_configs = matcher_configs;
-            mock
-        }
-
-        pub fn empty(transaction_id: i64) -> Self {
-            Self::new(transaction_id, Vec::new(), Vec::new())
-        }
-
-        // Call tracking methods
-        pub fn was_save_features_called(&self) -> bool {
-            self.save_features_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_save_scores_called(&self) -> bool {
-            self.save_scores_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_save_matching_fields_called(&self) -> bool {
-            self.save_matching_fields_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_get_features_called(&self) -> bool {
-            self.get_features_called.load(Ordering::Relaxed)
-        }
-    }
-
-    /// Mock implementation of Processible trait
-    #[derive(Debug, Clone)]
-    pub struct MockProcessible {
-        pub id: i64,
-        pub features: Vec<TestFeature>,
-        pub matching_fields: Vec<TestMatchingField>,
-    }
-
-    impl MockProcessible {
-        pub fn new(id: i64) -> Self {
-            Self {
-                id,
-                features: vec![TestDataFactory::create_feature("test_feature", 42)],
-                matching_fields: vec![TestDataFactory::create_matching_field("test_matcher", "test_value")],
-            }
-        }
-
-        pub fn with_features(id: i64, features: Vec<TestFeature>) -> Self {
-            Self {
-                id,
-                features,
-                matching_fields: vec![TestDataFactory::create_matching_field("default", "test")],
-            }
-        }
-
-        pub fn high_value(id: i64) -> Self {
-            Self {
-                id,
-                features: vec![
-                    TestDataFactory::create_feature("value", 10000),
-                    TestDataFactory::create_string_feature("type", "high_value"),
-                ],
-                matching_fields: vec![TestDataFactory::create_matching_field("value_matcher", "high")],
-            }
-        }
-
-        pub fn low_value(id: i64) -> Self {
-            Self {
-                id,
-                features: vec![
-                    TestDataFactory::create_feature("value", 100),
-                    TestDataFactory::create_string_feature("type", "low_value"),
-                ],
-                matching_fields: vec![TestDataFactory::create_matching_field("value_matcher", "low")],
-            }
-        }
-
-        pub fn tx_id(&self) -> i64 {
-            self.id
-        }
-
-        pub fn get_id(&self) -> i64 {
-            self.id
-        }
-
-        pub fn extract_simple_features(&self) -> Vec<TestFeature> {
-            self.features.clone()
-        }
-
-        pub fn extract_graph_features(&self, _connected_transactions: &[TestConnectedTransaction], _direct_connections: &[TestDirectConnection]) -> Vec<TestFeature> {
-            self.features.clone()
-        }
-
-        pub fn extract_matching_fields(&self) -> Vec<TestMatchingField> {
-            self.matching_fields.clone()
-        }
-    }
-
-    /// Mock QueueService implementation
-    #[derive(Debug, Clone)]
-    pub struct MockQueueService {
-        pub fetch_next_called: Arc<AtomicBool>,
-        pub mark_processed_called: Arc<AtomicBool>,
-        pub enqueue_called: Arc<AtomicBool>,
-        pub return_value: Option<i64>,
-        pub expected_mark_processed_id: i64,
-        pub should_fail: bool,
-    }
-
-    impl MockQueueService {
-        pub fn new(return_value: Option<i64>, expected_mark_processed_id: i64) -> Self {
-            Self {
-                fetch_next_called: Arc::new(AtomicBool::new(false)),
-                mark_processed_called: Arc::new(AtomicBool::new(false)),
-                enqueue_called: Arc::new(AtomicBool::new(false)),
-                return_value,
-                expected_mark_processed_id,
-                should_fail: false,
-            }
-        }
-
-        pub fn empty() -> Self {
-            Self::new(None, 0)
-        }
-
-        pub fn failing() -> Self {
-            let mut service = Self::new(None, 0);
-            service.should_fail = true;
-            service
-        }
-
-        pub fn was_fetch_next_called(&self) -> bool {
-            self.fetch_next_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_mark_processed_called(&self) -> bool {
-            self.mark_processed_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_enqueue_called(&self) -> bool {
-            self.enqueue_called.load(Ordering::Relaxed)
-        }
-
-        pub async fn fetch_next(&self) -> Result<Option<i64>, TestError> {
-            self.fetch_next_called.store(true, Ordering::Relaxed);
-            
-            if self.should_fail {
-                return Err(TestError::mock_failure("Mock queue service failure"));
-            }
-            
-            Ok(self.return_value)
-        }
-
-        pub async fn mark_processed(&self, tx_id: i64) -> Result<(), TestError> {
-            self.mark_processed_called.store(true, Ordering::Relaxed);
-            
-            if self.should_fail {
-                return Err(TestError::mock_failure("Mock queue service failure"));
-            }
-            
-            test_assert_eq!(tx_id, self.expected_mark_processed_id, "Mark processed ID mismatch");
-            Ok(())
-        }
-
-        pub async fn enqueue(&self, _tx_id: i64) -> Result<(), TestError> {
-            self.enqueue_called.store(true, Ordering::Relaxed);
-            
-            if self.should_fail {
-                return Err(TestError::mock_failure("Mock queue service failure"));
-            }
-            
-            Ok(())
-        }
-    }
-
-    // Supporting test data structures for processing-specific mocks
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct TestConnectedTransaction {
-        pub id: i64,
-        pub connection_type: String,
-        pub confidence: i32,
-    }
-
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct TestDirectConnection {
-        pub id: i64,
-        pub connection_type: String,
-        pub strength: i32,
-    }
-
-    // Web-specific mocks for API testing
-    #[derive(Debug, Clone, serde::Serialize)]
-    pub struct MockWebTransaction {
-        pub id: i64,
-        pub label_id: Option<i64>,
-    }
-
-    impl MockWebTransaction {
-        pub fn new(id: i64) -> Self {
-            Self { id, label_id: None }
-        }
-
-        pub fn with_label(id: i64, label_id: i64) -> Self {
-            Self { id, label_id: Some(label_id) }
-        }
-
-        pub fn get_id(&self) -> i64 {
-            self.id
-        }
-    }
-
-    #[derive(Debug)]
-    pub struct MockWebStorage {
-        pub transactions: Vec<MockWebTransaction>,
-        pub get_transaction_called: Arc<AtomicBool>,
-        pub get_transactions_called: Arc<AtomicBool>,
-    }
-
-    impl MockWebStorage {
-        pub fn new(transactions: Vec<MockWebTransaction>) -> Self {
-            Self {
-                transactions,
-                get_transaction_called: Arc::new(AtomicBool::new(false)),
-                get_transactions_called: Arc::new(AtomicBool::new(false)),
-            }
-        }
-
-        pub fn empty() -> Self {
-            Self::new(Vec::new())
-        }
-
-        pub fn was_get_transaction_called(&self) -> bool {
-            self.get_transaction_called.load(Ordering::Relaxed)
-        }
-
-        pub fn was_get_transactions_called(&self) -> bool {
-            self.get_transactions_called.load(Ordering::Relaxed)
-        }
-
-        pub async fn get_transaction(&self, transaction_id: i64) -> Result<MockWebTransaction, TestError> {
-            self.get_transaction_called.store(true, Ordering::Relaxed);
-            
-            self.transactions
-                .iter()
-                .find(|t| t.id == transaction_id)
-                .cloned()
-                .ok_or_else(|| TestError::transaction_not_found(transaction_id))
-        }
-
-        pub async fn get_transactions(&self) -> Result<Vec<MockWebTransaction>, TestError> {
-            self.get_transactions_called.store(true, Ordering::Relaxed);
-            Ok(self.transactions.clone())
-        }
-    }
-}
-
-#[cfg(feature = "processing-mocks")]
-pub use processing_mocks::*;
-
-#[cfg(feature = "async-sqlx")]
 mod sqlx_helpers {
     use super::*;
     use sqlx::PgPool;
     use std::path::PathBuf;
     use std::error::Error;
+    use serde_json::Value;
+    use chrono::NaiveDate;
 
     /// Create a database connection pool for testing
-    /// 
-    /// # Returns
-    /// A Result containing the PgPool or an error
     pub async fn create_test_pool() -> Result<PgPool, Box<dyn Error + Send + Sync>> {
         let database_url = get_test_database_url();
         let pool = PgPool::connect(&database_url).await?;
@@ -926,8 +477,6 @@ mod sqlx_helpers {
     }
 
     /// Global test setup function that should be called before running any tests
-    /// 
-    /// This initializes the test environment including database schema setup.
     pub async fn setup_test_environment() -> Result<(), Box<dyn Error + Send + Sync>> {
         let pool = create_test_pool().await?;
         initialize_test_schema(&pool).await?;
@@ -935,17 +484,7 @@ mod sqlx_helpers {
     }
 
     /// Initialize database schema for testing using SQLx migrations
-    /// 
-    /// This sets up the database schema by running migrations and verifying
-    /// that required tables exist.
-    /// 
-    /// # Arguments
-    /// * `pool` - The database connection pool
-    /// 
-    /// # Returns
-    /// Result indicating success or failure of schema initialization
     pub async fn initialize_test_schema(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
-        // Get the absolute path to the migrations directory
         let workspace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
@@ -953,126 +492,231 @@ mod sqlx_helpers {
         
         let migrations_dir = workspace_dir.join("migrations");
         
-        // Run migrations if the directory exists
         if migrations_dir.exists() {
             println!("Running migrations from: {:?}", migrations_dir);
             sqlx::migrate::Migrator::new(migrations_dir)
                 .await?
                 .run(pool)
                 .await?;
-        } else {
-            println!("Migrations directory not found at: {:?}, skipping migrations", migrations_dir);
         }
         
-        // Verify core tables exist
-        verify_core_tables(pool).await?;
-        
+        // Basic connection verification
+        sqlx::query("SELECT 1").fetch_optional(pool).await?;
+        println!("Database connection verified");
         Ok(())
+    }
+
+    /// Generic table truncation with dependency ordering
+    pub async fn truncate_tables(pool: &PgPool, tables: &[&str]) -> Result<(), Box<dyn Error + Send + Sync>> {
+        for table in tables {
+            let query = format!("TRUNCATE TABLE {} RESTART IDENTITY CASCADE", table);
+            match sqlx::query(&query).execute(pool).await {
+                Ok(_) => println!("Truncated table: {}", table),
+                Err(e) => println!("Could not truncate table {}: {} (table may not exist)", table, e),
+            }
+        }
+        Ok(())
+    }
+
+    /// Truncate processing tables in dependency order
+    pub async fn truncate_processing_tables(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tables = &[
+            "order_items", "customers", "billing_data", "orders",
+            "match_node_transactions", "match_node", "transactions", "features",
+            "channels", "scoring_events", "triggered_rules", "labels"
+        ];
+        truncate_tables(pool, tables).await
+    }
+
+    /// Truncate connection test tables
+    pub async fn truncate_connection_test_tables(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tables = &["match_node_transactions", "match_node", "transactions"];
+        truncate_tables(pool, tables).await
+    }
+
+    /// Create a test model and return its ID  
+    pub async fn create_test_model(pool: &PgPool, name: &str) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("INSERT INTO models (name, features_schema_version_major, features_schema_version_minor) VALUES ($1, 1, 0) RETURNING id", name)
+            .fetch_one(pool).await?;
+        Ok(row.id)
     }
     
-    /// Verify that core tables required for testing exist
-    async fn verify_core_tables(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
-        // This is a basic check - can be expanded based on actual schema requirements
-        let table_check = sqlx::query("SELECT 1")
-            .fetch_optional(pool)
-            .await;
+    /// Create a test channel and return its ID
+    pub async fn create_test_channel(pool: &PgPool, name: &str, model_id: i64) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("INSERT INTO channels (name, model_id) VALUES ($1, $2) RETURNING id", name, model_id)
+            .fetch_one(pool).await?;
+        Ok(row.id)
+    }
+    
+    /// Create a test match node and return its ID
+    pub async fn create_test_match_node(pool: &PgPool, matcher: &str, value: &str, confidence: i32, importance: i32) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("INSERT INTO match_node (matcher, value, confidence, importance) VALUES ($1, $2, $3, $4) RETURNING id", matcher, value, confidence, importance)
+            .fetch_one(pool).await?;
+        Ok(row.id)
+    }
+
+    /// Create a test scoring rule (complex case that needs manual implementation)
+    pub async fn create_test_scoring_rule(
+        pool: &PgPool, 
+        model_id: i64, 
+        name: &str, 
+        description: &str, 
+        rule: Value, 
+        score: i32
+    ) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!(
+            "INSERT INTO scoring_rules (model_id, name, description, rule, score) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+            model_id, name, description, rule, score
+        ).fetch_one(pool).await?;
+        Ok(row.id)
+    }
+
+    /// Create a transaction with unique test ID
+    pub async fn create_test_transaction(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let unique_id = generate_unique_test_id() as i64;
+        sqlx::query!("INSERT INTO transactions (id, created_at) VALUES ($1, NOW())", unique_id)
+            .execute(pool).await?;
+        Ok(unique_id)
+    }
+
+    /// Generic batch insert for transactions
+    pub async fn create_test_transactions_batch(
+        pool: &PgPool, 
+        transaction_data: &[(i64, &str)]
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        for (id, created_at) in transaction_data {
+            // Parse the string timestamp into a proper datetime
+            let parsed_date = NaiveDate::parse_from_str(created_at, "%Y-%m-%d")?;
+            let parsed_time = parsed_date.and_hms_opt(0, 0, 0).unwrap();
+            sqlx::query!("INSERT INTO transactions (id, created_at) VALUES ($1, $2)", id, parsed_time)
+                .execute(pool).await?;
+        }
+        Ok(())
+    }
+
+    /// Generic batch insert for match nodes
+    pub async fn create_match_nodes_batch(
+        pool: &PgPool, 
+        nodes: &[(i64, &str, &str, i32, i32)]
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        for (id, matcher, value, confidence, importance) in nodes {
+            sqlx::query!(
+                "INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES ($1, $2, $3, $4, $5)",
+                id, matcher, value, confidence, importance
+            ).execute(pool).await?;
+        }
+        Ok(())
+    }
+
+    /// Link a transaction to a match node
+    pub async fn link_transaction_to_match_node(pool: &PgPool, node_id: i64, transaction_id: i64) -> Result<(), Box<dyn Error + Send + Sync>> {
+        sqlx::query!("INSERT INTO match_node_transactions (node_id, transaction_id) VALUES ($1, $2)", node_id, transaction_id)
+            .execute(pool).await?;
+        Ok(())
+    }
+
+    /// Count match node transactions for a specific transaction
+    pub async fn count_match_node_transactions(pool: &PgPool, transaction_id: i64) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("SELECT COUNT(*) as count FROM match_node_transactions WHERE transaction_id = $1", transaction_id)
+            .fetch_one(pool).await?;
+        Ok(row.count.unwrap_or(0))
+    }
+
+    /// Count triggered rules for a scoring event
+    pub async fn count_triggered_rules_for_scoring_event(pool: &PgPool, scoring_event_id: i64) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("SELECT COUNT(*) as count FROM triggered_rules WHERE scoring_events_id = $1", scoring_event_id)
+            .fetch_one(pool).await?;
+        Ok(row.count.unwrap_or(0))
+    }
+
+    /// Get scoring event by transaction ID
+    pub async fn get_scoring_event_by_transaction(pool: &PgPool, transaction_id: i64) -> Result<(i64, i64, i64, i32), Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("SELECT id, transaction_id, channel_id, total_score FROM scoring_events WHERE transaction_id = $1", transaction_id)
+            .fetch_one(pool).await?;
+        Ok((row.id, row.transaction_id, row.channel_id, row.total_score))
+    }
+
+    /// Get triggered rules for a scoring event
+    pub async fn get_triggered_rules_for_scoring_event(pool: &PgPool, scoring_event_id: i64) -> Result<Vec<i64>, Box<dyn Error + Send + Sync>> {
+        let rows = sqlx::query!("SELECT rule_id FROM triggered_rules WHERE scoring_events_id = $1", scoring_event_id)
+            .fetch_all(pool).await?;
+        Ok(rows.into_iter().map(|row| row.rule_id).collect())
+    }
+
+    /// Clean up ecom test data for a specific transaction
+    pub async fn cleanup_ecom_transaction(pool: &PgPool, transaction_id: i64) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut tx = pool.begin().await?;
         
-        match table_check {
-            Ok(_) => {
-                println!("Database connection verified");
-                Ok(())
-            }
-            Err(e) => {
-                println!("Database verification failed: {}", e);
-                Err(e.into())
-            }
+        // Delete in dependency order
+        for query in &[
+            "DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)",
+            "DELETE FROM customers WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)",
+            "DELETE FROM billing_data WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)",
+            "DELETE FROM orders WHERE transaction_id = $1",
+            "DELETE FROM transactions WHERE id = $1"
+        ] {
+            sqlx::query(query).bind(transaction_id).execute(&mut *tx).await?;
         }
-    }
-
-    /// Clean up test data - truncate processing tables
-    /// 
-    /// This function truncates tables used in processing tests to ensure
-    /// test isolation.
-    /// 
-    /// # Arguments
-    /// * `pool` - The database connection pool
-    /// 
-    /// # Returns
-    /// Result indicating success or failure of cleanup
-    pub async fn truncate_processing_tables(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
-        // List of tables to truncate for processing tests (includes ecom tables since they share the same database)
-        let tables = vec![
-            // Ecom tables (must come first due to foreign key dependencies)
-            "order_items",
-            "customers", 
-            "billing_data",
-            "orders",
-            // Match node tables (must come before match_node due to foreign key)
-            "match_node_transactions", 
-            "match_node",
-            // Core processing tables
-            "transactions",
-            "features", 
-            "scores",
-            "matching_fields",
-            "connected_transactions",
-            "direct_connections",
-            "channels",
-            "scoring_events",
-            "triggered_rules",
-            "labels"
-        ];
-
-        for table in tables {
-            let query = format!("TRUNCATE TABLE {} RESTART IDENTITY CASCADE", table);
-            match sqlx::query(&query).execute(pool).await {
-                Ok(_) => println!("Truncated table: {}", table),
-                Err(e) => {
-                    // Don't fail if table doesn't exist, just log it
-                    println!("Could not truncate table {}: {} (table may not exist)", table, e);
-                }
-            }
-        }
-
+        
+        tx.commit().await?;
         Ok(())
     }
 
-    /// Clean up test data - truncate ecom tables
-    /// 
-    /// This function truncates tables used in ecom tests to ensure
-    /// test isolation.
-    /// 
-    /// # Arguments
-    /// * `pool` - The database connection pool
-    /// 
-    /// # Returns
-    /// Result indicating success or failure of cleanup
-    pub async fn truncate_ecom_tables(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
-        // List of tables to truncate for ecom tests
-        let tables = vec![
-            "ecom_transactions",
-            "ecom_queue",
-            "ecom_import_jobs"
-        ];
+    // Generic getters for common queries
+    pub async fn get_all_match_nodes(pool: &PgPool) -> Result<Vec<(String, String, i32, i32)>, Box<dyn Error + Send + Sync>> {
+        let rows = sqlx::query!("SELECT matcher, value, confidence, importance FROM match_node")
+            .fetch_all(pool).await?;
+        Ok(rows.into_iter().map(|row| (row.matcher, row.value, row.confidence, row.importance)).collect())
+    }
 
-        for table in tables {
-            let query = format!("TRUNCATE TABLE {} RESTART IDENTITY CASCADE", table);
-            match sqlx::query(&query).execute(pool).await {
-                Ok(_) => println!("Truncated table: {}", table),
-                Err(e) => {
-                    // Don't fail if table doesn't exist, just log it
-                    println!("Could not truncate table {}: {} (table may not exist)", table, e);
-                }
-            }
-        }
+    pub async fn get_match_node_id(pool: &PgPool, matcher: &str, value: &str) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("SELECT id FROM match_node WHERE matcher = $1 AND value = $2", matcher, value)
+            .fetch_one(pool).await?;
+        Ok(row.id)
+    }
 
-        Ok(())
+    pub async fn get_transactions_for_match_node(pool: &PgPool, node_id: i64) -> Result<Vec<i64>, Box<dyn Error + Send + Sync>> {
+        let rows = sqlx::query!("SELECT transaction_id FROM match_node_transactions WHERE node_id = $1", node_id)
+            .fetch_all(pool).await?;
+        Ok(rows.into_iter().map(|row| row.transaction_id).collect())
+    }
+
+    pub async fn count_match_nodes(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("SELECT COUNT(*) as count FROM match_node").fetch_one(pool).await?;
+        Ok(row.count.unwrap_or(0))
+    }
+
+    pub async fn count_all_match_node_transactions(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        let row = sqlx::query!("SELECT COUNT(*) as count FROM match_node_transactions").fetch_one(pool).await?;
+        Ok(row.count.unwrap_or(0))
+    }
+
+    // Aliases for backward compatibility
+    pub async fn create_ecom_test_transaction(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        create_test_transaction(pool).await
+    }
+
+    pub async fn create_test_transaction_with_unique_id(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+        create_test_transaction(pool).await
     }
 }
 
 // Export sqlx helper functions at the module level
-#[cfg(feature = "async-sqlx")]
 pub use sqlx_helpers::*;
+
+// Export the new sqlx helpers for easy access
+pub use sqlx_helpers::{
+    create_test_model, create_test_channel, create_test_scoring_rule, 
+    create_test_match_node, link_transaction_to_match_node,
+    get_scoring_event_by_transaction, get_triggered_rules_for_scoring_event,
+    count_triggered_rules_for_scoring_event, cleanup_ecom_transaction,
+    truncate_connection_test_tables, create_test_transactions_batch,
+    create_match_nodes_batch, get_all_match_nodes, count_match_node_transactions,
+    get_match_node_id, get_transactions_for_match_node, count_match_nodes,
+    count_all_match_node_transactions, create_ecom_test_transaction,
+    create_test_transaction_with_unique_id, create_test_transaction,
+    truncate_tables
+};
 
 #[cfg(test)]
 mod tests {
@@ -1109,7 +753,6 @@ mod tests {
         assert_eq!(in_memory_url, "sqlite::memory:");
     }
 
-    #[cfg(feature = "async-sqlx")]
     #[tokio::test]
     async fn test_mock_queue() {
         let queue = MockQueue::new();
@@ -1141,9 +784,6 @@ pub enum TestError {
     #[error("Assertion failed: {message}")]
     AssertionFailure { message: String },
     
-    #[error("Setup error: {message}")]
-    SetupError { message: String },
-    
     #[error("Database error: {source}")]
     DatabaseError { #[from] source: sqlx::Error },
     
@@ -1153,20 +793,11 @@ pub enum TestError {
     #[error("HTTP error: {source}")]
     HttpError { #[from] source: http::Error },
     
-    #[error("Request error: {source}")]
-    RequestError { #[from] source: reqwest::Error },
-    
-    #[error("Validation error: {message}")]
-    ValidationError { message: String },
-    
     #[error("Feature type mismatch: expected {expected}, got {actual}")]
     FeatureTypeMismatch { expected: String, actual: String },
     
     #[error("Transaction not found: {id}")]
     TransactionNotFound { id: i64 },
-    
-    #[error("Test timeout: {operation} took longer than {timeout_ms}ms")]
-    Timeout { operation: String, timeout_ms: u64 },
     
     #[error("Generic test error: {message}")]
     Generic { message: String },
@@ -1183,15 +814,7 @@ impl TestError {
         Self::AssertionFailure { message: message.into() }
     }
     
-    /// Create a setup error
-    pub fn setup_error(message: impl Into<String>) -> Self {
-        Self::SetupError { message: message.into() }
-    }
-    
-    /// Create a validation error
-    pub fn validation_error(message: impl Into<String>) -> Self {
-        Self::ValidationError { message: message.into() }
-    }
+
     
     /// Create a feature type mismatch error
     pub fn feature_type_mismatch(expected: impl Into<String>, actual: impl Into<String>) -> Self {
@@ -1206,13 +829,7 @@ impl TestError {
         Self::TransactionNotFound { id }
     }
     
-    /// Create a timeout error
-    pub fn timeout(operation: impl Into<String>, timeout_ms: u64) -> Self {
-        Self::Timeout { 
-            operation: operation.into(), 
-            timeout_ms 
-        }
-    }
+
     
     /// Create a generic error
     pub fn generic(message: impl Into<String>) -> Self {
@@ -1348,5 +965,5 @@ pub mod test_utils {
             ));
         }
         Ok(())
-    }
-} 
+          }
+  } 

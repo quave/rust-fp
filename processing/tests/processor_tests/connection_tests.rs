@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
 use processing::model::{Processible, ConnectedTransaction, DirectConnection};
-use super::mocks::{TestTransaction, ConnectionTrackingStorage, MockProcessibleStorage, MockQueue, MockScorer};
+use super::mocks::{TestTransaction, ConnectionTrackingStorage, MockProcessibleStorage, MockQueueService, create_high_value_scorer, create_empty_scorer};
 
 #[tokio::test]
 async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -53,8 +53,13 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
     // Set up mocks
     let storage = ConnectionTrackingStorage::new(connected_transactions.clone(), direct_connections.clone());
     let processible_storage = MockProcessibleStorage::new(transaction);
-    let queue = MockQueue::new(Some(1));
-    let scorer = MockScorer::high_value_scorer();
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_mark_processed().returning(|_| Ok(()));
+    let queue = Arc::new(queue);
+    
+    let scorer = create_high_value_scorer();
     
     // Create processor
     let processor = Processor::new(
@@ -62,8 +67,8 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
         scorer,
         Arc::new(storage.clone()),
         Arc::new(processible_storage),
-        Arc::new(queue.clone()),
-        Arc::new(queue),
+        queue.clone(),
+        queue,
     );
     
     // Process the transaction
@@ -133,8 +138,13 @@ async fn test_processor_connection_verification() -> Result<(), Box<dyn Error + 
     // Set up mocks
     let storage = ConnectionTrackingStorage::new(connected_transactions, direct_connections);
     let processible_storage = MockProcessibleStorage::new(transaction);
-    let queue = MockQueue::new(Some(1));
-    let scorer = MockScorer::new(vec![]);
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_mark_processed().returning(|_| Ok(()));
+    let queue = Arc::new(queue);
+    
+    let scorer = create_empty_scorer();
     
     // Create processor
     let processor = Processor::new(
@@ -142,8 +152,8 @@ async fn test_processor_connection_verification() -> Result<(), Box<dyn Error + 
         scorer,
         Arc::new(storage.clone()),
         Arc::new(processible_storage),
-        Arc::new(queue.clone()),
-        Arc::new(queue),
+        queue.clone(),
+        queue,
     );
     
     // Process the transaction
@@ -241,8 +251,13 @@ async fn test_processor_empty_connections() -> Result<(), Box<dyn Error + Send +
     // Set up mocks with empty connections
     let storage = ConnectionTrackingStorage::new(Vec::new(), Vec::new());
     let processible_storage = MockProcessibleStorage::new(transaction);
-    let queue = MockQueue::new(Some(1));
-    let scorer = MockScorer::high_value_scorer();
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_mark_processed().returning(|_| Ok(()));
+    let queue = Arc::new(queue);
+    
+    let scorer = create_high_value_scorer();
     
     // Create processor
     let processor = Processor::new(
@@ -250,8 +265,8 @@ async fn test_processor_empty_connections() -> Result<(), Box<dyn Error + Send +
         scorer,
         Arc::new(storage.clone()),
         Arc::new(processible_storage),
-        Arc::new(queue.clone()),
-        Arc::new(queue),
+        queue.clone(),
+        queue,
     );
     
     // Process the transaction

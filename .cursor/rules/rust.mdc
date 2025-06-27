@@ -3,64 +3,108 @@ description:
 globs: *.rs
 alwaysApply: false
 ---
-
 You are an expert in Rust, async programming, and concurrent systems.
 
-Key Principles
-- Write clear, concise, and idiomatic Rust code with accurate examples.
-- Use async programming paradigms effectively, leveraging `tokio` for concurrency.
-- Prioritize modularity, clean code organization, and efficient resource management.
-- Use expressive variable names that convey intent (e.g., `is_ready`, `has_data`).
-- Adhere to Rust's naming conventions: snake_case for variables and functions, PascalCase for types and structs.
-- Avoid code duplication; use functions and modules to encapsulate reusable logic.
-- Write code with safety, concurrency, and performance in mind, embracing Rust's ownership and type system.
+## Core Principles
 
-Async Programming
-- Use `tokio` as the async runtime for handling asynchronous tasks and I/O.
-- Implement async functions using `async fn` syntax.
-- Leverage `tokio::spawn` for task spawning and concurrency.
-- Use `tokio::select!` for managing multiple async tasks and cancellations.
-- Favor structured concurrency: prefer scoped tasks and clean cancellation paths.
-- Implement timeouts, retries, and backoff strategies for robust async operations.
+**Code Quality**
+- Write clear, concise, and idiomatic Rust code with accurate examples
+- Use expressive variable names that convey intent (e.g., `is_ready`, `has_data`)
+- Follow Rust naming conventions: snake_case for variables/functions, PascalCase for types/structs
+- Avoid code duplication; use functions and modules to encapsulate reusable logic
+- Prioritize modularity and clean code organization
 
-Channels and Concurrency
-- Use Rust's `tokio::sync::mpsc` for asynchronous, multi-producer, single-consumer channels.
-- Use `tokio::sync::broadcast` for broadcasting messages to multiple consumers.
-- Implement `tokio::sync::oneshot` for one-time communication between tasks.
-- Prefer bounded channels for backpressure; handle capacity limits gracefully.
-- Use `tokio::sync::Mutex` and `tokio::sync::RwLock` for shared state across tasks, avoiding deadlocks.
+**Strategic Analysis Before Implementation**
+- **ANALYZE FIRST**: Before adding new functionality, audit existing patterns for consolidation opportunities
+- **PATTERN RECOGNITION**: Look for similar functions that can be generalized into reusable building blocks
+- **COST JUSTIFICATION**: If adding >100 lines of code, justify why consolidation isn't a better approach
+- **GENERIC + SPECIFIC**: Design generic functions with specific wrappers, not multiple similar functions
 
-Error Handling and Safety
-- Embrace Rust's Result and Option types for error handling.
-- Use `?` operator to propagate errors in async functions.
-- Implement custom error types using `thiserror` or `anyhow` for more descriptive errors.
-- Handle errors and edge cases early, returning errors where appropriate.
-- Use `.await` responsibly, ensuring safe points for context switching.
+**Consolidation Principles**
+- **COMPOSITION OVER DUPLICATION**: Combine simple building blocks rather than copying patterns
+- **QUESTION EVERY NEW FUNCTION**: Ask "Does something similar already exist that I can extend?"
+- **BUILDING BLOCKS FIRST**: Create reusable components that can be composed for specific needs
+- **ELIMINATE REDUNDANCY**: Actively seek and remove duplicate code patterns across the codebase
 
-Testing
-- Write unit tests with `tokio::test` for async tests.
-- Use `tokio::time::pause` for testing time-dependent code without real delays.
-- Implement integration tests to validate async behavior and concurrency.
-- Use mocks and fakes for external dependencies in tests.
+**Red Flags for Missed Consolidation**
+- Adding >3 functions with similar signatures or patterns
+- Copying implementation patterns, setup code, or error handling between functions
+- Creating multiple functions with similar prefixes (e.g., "create_", "batch_", "cleanup_")
+- Writing repetitive boilerplate that could be abstracted into generic utilities
 
-Performance Optimization
-- Minimize async overhead; use sync code where async is not needed.
-- Avoid blocking operations inside async functions; offload to dedicated blocking threads if necessary.
-- Use `tokio::task::yield_now` to yield control in cooperative multitasking scenarios.
-- Optimize data structures and algorithms for async use, reducing contention and lock duration.
-- Use `tokio::time::sleep` and `tokio::time::interval` for efficient time-based operations.
+**Safety and Performance**
+- Embrace Rust's ownership system and type safety guarantees
+- Handle errors explicitly using Result and Option types
+- Use the `?` operator for error propagation
+- Design with safety, concurrency, and performance in mind
+- Minimize resource usage and optimize for efficiency
 
-Key Conventions
-1. Structure the application into modules: separate concerns like networking, database, and business logic.
-2. Use environment variables for configuration management (e.g., `dotenv` crate).
-3. Ensure code is well-documented with inline comments and Rustdoc.
+## Async Programming
 
-Async Ecosystem
-- Use `tokio` for async runtime and task management.
-- Leverage `hyper` or `reqwest` for async HTTP requests.
-- Use `serde` for serialization/deserialization.
-- Use `sqlx` or `tokio-postgres` for async database interactions.
-- Utilize `tonic` for gRPC with async support.
+**Design Patterns**
+- Use async programming paradigms effectively for I/O-bound operations
+- Avoid blocking operations in async contexts; offload to dedicated threads when necessary
+- Use `.await` responsibly at safe context-switching points
+- Prefer cooperative multitasking with appropriate yielding
 
-Refer to Rust's async book and `tokio` documentation for in-depth information on async patterns, best practices, and advanced features.
+**Error Handling**
+- Implement custom error types for descriptive error handling
+- Handle errors and edge cases early in the call stack
+- Propagate errors appropriately through async function chains
+
+## Testing Standards
+
+**Quality Requirements**
+- **TIGHT**: Test code must be as clean and concise as production code
+- **CENTRALIZED**: Never duplicate test utilities; create shared test modules for common patterns
+- **CONSISTENT**: Use identical patterns for identical testing scenarios across the codebase
+- **NEVER BROKEN**: Test code quality is non-negotiable
+- **OPTIMAL FIRST**: Jump directly to the best technical solution
+
+**Test-Specific Guidelines**
+- **SHARED TEST MODULES**: Create centralized test utilities to eliminate duplication across test files
+- **MOCK CONSISTENCY**: Use identical mocking patterns for the same external dependencies
+- **TEST DATA FACTORIES**: Build reusable test data creation functions rather than inline setup
+- **ISOLATION FIRST**: Design tests for parallel execution with proper data isolation
+- **VERIFICATION HELPERS**: Create assertion helpers for complex domain-specific validations
+
+**Implementation**
+- Write comprehensive unit tests for all logic
+- Implement integration tests for system behavior validation
+- Use mocks and test doubles for external dependencies
+- Test async behavior and concurrency scenarios
+- Avoid real delays in time-dependent tests
+
+## Architecture
+
+**Organization**
+- Structure applications into logical modules with clear separation of concerns
+- Separate networking, database, business logic, and configuration layers
+- Use environment variables and configuration files for settings management
+- Document code thoroughly with inline comments and documentation comments
+
+**Performance**
+- Optimize data structures and algorithms for concurrent access
+- Minimize contention and lock duration in shared resources
+- Use efficient time-based operations and scheduling
+- Profile and benchmark critical paths
+
+## Testing Commands Reference
+
+```bash
+# Basic testing
+cargo test                                    # Run all tests
+cargo test -- --nocapture                   # Run with output
+cargo test test_name -- --nocapture         # Run specific test
+cargo test --package package_name           # Run package tests
+cargo test pattern -- --nocapture           # Run tests matching pattern
+
+# Advanced testing
+cargo test module::test -- --nocapture      # Run specific module test
+cargo test --test integration_test          # Run integration tests
+cargo test -- --test-threads=1              # Single-threaded execution
+cargo test -- --ignored                     # Run ignored tests
+cargo test -- --include-ignored             # Run all tests including ignored
+cargo test --verbose -- --nocapture         # Verbose output
+```
   

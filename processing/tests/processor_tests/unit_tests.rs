@@ -3,7 +3,7 @@ use std::sync::Arc;
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
 use processing::model::Processible;
-use super::mocks::{TestTransaction, MockCommonStorage, MockProcessibleStorage, MockQueue, MockScorer};
+use super::mocks::{TestTransaction, MockCommonStorage, MockProcessibleStorage, MockQueueService, create_high_value_scorer, create_low_value_scorer};
 
 #[tokio::test]
 async fn test_processor_with_high_value_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -14,8 +14,13 @@ async fn test_processor_with_high_value_transaction() -> Result<(), Box<dyn Erro
     // Set up mocks
     let storage = MockCommonStorage::new(features);
     let processible_storage = MockProcessibleStorage::new(transaction);
-    let queue = MockQueue::new(Some(1));
-    let scorer = MockScorer::high_value_scorer();
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_mark_processed().returning(|_| Ok(()));
+    let queue = Arc::new(queue);
+    
+    let scorer = create_high_value_scorer();
     
     // Create processor
     let processor = Processor::new(
@@ -23,8 +28,8 @@ async fn test_processor_with_high_value_transaction() -> Result<(), Box<dyn Erro
         scorer,
         Arc::new(storage),
         Arc::new(processible_storage),
-        Arc::new(queue.clone()),
-        Arc::new(queue),
+        queue.clone(),
+        queue,
     );
     
     // Process the transaction
@@ -49,8 +54,13 @@ async fn test_processor_with_low_value_transaction() -> Result<(), Box<dyn Error
     // Set up mocks
     let storage = MockCommonStorage::new(features);
     let processible_storage = MockProcessibleStorage::new(transaction);
-    let queue = MockQueue::new(Some(2));
-    let scorer = MockScorer::low_value_scorer();
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next().returning(|| Ok(Some(2)));
+    queue.expect_mark_processed().returning(|_| Ok(()));
+    let queue = Arc::new(queue);
+    
+    let scorer = create_low_value_scorer();
     
     // Create processor
     let processor = Processor::new(
@@ -58,8 +68,8 @@ async fn test_processor_with_low_value_transaction() -> Result<(), Box<dyn Error
         scorer,
         Arc::new(storage),
         Arc::new(processible_storage),
-        Arc::new(queue.clone()),
-        Arc::new(queue),
+        queue.clone(),
+        queue,
     );
     
     // Process the transaction
@@ -84,8 +94,13 @@ async fn test_processor_with_empty_queue() -> Result<(), Box<dyn Error + Send + 
     // Set up mocks with empty queue
     let storage = MockCommonStorage::new(features);
     let processible_storage = MockProcessibleStorage::new(transaction);
-    let queue = MockQueue::new(None); // Empty queue
-    let scorer = MockScorer::high_value_scorer();
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next().returning(|| Ok(None)); // Empty queue
+    queue.expect_mark_processed().returning(|_| Ok(()));
+    let queue = Arc::new(queue);
+    
+    let scorer = create_high_value_scorer();
     
     // Create processor
     let processor = Processor::new(
@@ -93,8 +108,8 @@ async fn test_processor_with_empty_queue() -> Result<(), Box<dyn Error + Send + 
         scorer,
         Arc::new(storage),
         Arc::new(processible_storage),
-        Arc::new(queue.clone()),
-        Arc::new(queue),
+        queue.clone(),
+        queue,
     );
     
     // Try to process - should handle gracefully when no transaction ID provided
@@ -160,8 +175,13 @@ async fn test_processor_scorer_integration() -> Result<(), Box<dyn Error + Send 
     // Set up mocks
     let storage = MockCommonStorage::new(features);
     let processible_storage = MockProcessibleStorage::new(transaction);
-    let queue = MockQueue::new(Some(1));
-    let scorer = MockScorer::high_value_scorer();
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_mark_processed().returning(|_| Ok(()));
+    let queue = Arc::new(queue);
+    
+    let scorer = create_high_value_scorer();
     
     // Create processor
     let processor = Processor::new(
@@ -169,8 +189,8 @@ async fn test_processor_scorer_integration() -> Result<(), Box<dyn Error + Send 
         scorer,
         Arc::new(storage),
         Arc::new(processible_storage),
-        Arc::new(queue.clone()),
-        Arc::new(queue),
+        queue.clone(),
+        queue,
     );
     
     // Process the transaction

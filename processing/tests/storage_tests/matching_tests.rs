@@ -6,7 +6,7 @@ use common::test_helpers::truncate_processing_tables;
 use std::error::Error;
 use serial_test::serial;
 
-use super::setup::get_test_storage;
+use super::setup::{get_test_storage, create_test_transaction};
 
 #[tokio::test]
 #[serial]
@@ -17,8 +17,8 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     truncate_processing_tables(&pool).await?;
     
     // Create transactions to test with
-    let transaction_id1 = storage.insert_transaction().await?;
-    let transaction_id2 = storage.insert_transaction().await?;
+    let transaction_id1 = create_test_transaction(&storage).await?;
+    let transaction_id2 = create_test_transaction(&storage).await?;
     
     // Create custom matching config using HashMap - define values explicitly for test
     let mut matcher_configs = std::collections::HashMap::new();
@@ -47,50 +47,33 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     storage.save_matching_fields(transaction_id1, &matching_fields1).await?;
     
     // Query database to verify nodes were created
-    let saved_nodes = sqlx::query!(
-        r#"
-        SELECT matcher, value, confidence, importance
-        FROM match_node
-        ORDER BY matcher
-        "#
-    )
-    .fetch_all(&pool)
-    .await?;
+    let saved_nodes = common::test_helpers::get_all_match_nodes(&pool).await?;
     
     // Verify 3 nodes were created with correct values
     assert_eq!(saved_nodes.len(), 3, "Expected 3 match nodes to be created");
     
     // Verify the billing.payment_details node
-    assert_eq!(saved_nodes[0].matcher, "billing.payment_details");
-    assert_eq!(saved_nodes[0].value, "4111-1111-1111-1111");
-    assert_eq!(saved_nodes[0].confidence, 100); // Default from ProdCommonStorage
-    assert_eq!(saved_nodes[0].importance, 80);  // Default from ProdCommonStorage
+    assert_eq!(saved_nodes[0].0, "billing.payment_details");
+    assert_eq!(saved_nodes[0].1, "4111-1111-1111-1111");
+    assert_eq!(saved_nodes[0].2, 100); // Default from ProdCommonStorage
+    assert_eq!(saved_nodes[0].3, 80);  // Default from ProdCommonStorage
     
     // Verify the customer.email node
-    assert_eq!(saved_nodes[1].matcher, "customer.email");
-    assert_eq!(saved_nodes[1].value, "test@example.com");
-    assert_eq!(saved_nodes[1].confidence, 100); // Default from ProdCommonStorage
-    assert_eq!(saved_nodes[1].importance, 90);  // Default from ProdCommonStorage
+    assert_eq!(saved_nodes[1].0, "customer.email");
+    assert_eq!(saved_nodes[1].1, "test@example.com");
+    assert_eq!(saved_nodes[1].2, 100); // Default from ProdCommonStorage
+    assert_eq!(saved_nodes[1].3, 90);  // Default from ProdCommonStorage
     
     // Verify the custom matcher node - uses default values since it's not in the config
-    assert_eq!(saved_nodes[2].matcher, "test.matcher");
-    assert_eq!(saved_nodes[2].value, "test-value");
-    assert_eq!(saved_nodes[2].confidence, 80);  // Default confidence
-    assert_eq!(saved_nodes[2].importance, 50);  // Default importance
+    assert_eq!(saved_nodes[2].0, "test.matcher");
+    assert_eq!(saved_nodes[2].1, "test-value");
+    assert_eq!(saved_nodes[2].2, 80);  // Default confidence
+    assert_eq!(saved_nodes[2].3, 50);  // Default importance
     
     // Verify node-transaction connections
-    let node_transactions = sqlx::query!(
-        r#"
-        SELECT COUNT(*) as count
-        FROM match_node_transactions
-        WHERE transaction_id = $1
-        "#,
-        transaction_id1
-    )
-    .fetch_one(&pool)
-    .await?;
+    let connection_count = common::test_helpers::count_match_node_transactions(&pool, transaction_id1 as i64).await?;
     
-    assert_eq!(node_transactions.count.unwrap(), 3, "Expected 3 node-transaction connections");
+    assert_eq!(connection_count, 3, "Expected 3 node-transaction connections");
     
     // Test matching fields for second transaction with some overlap
     let matching_fields2 = vec![
@@ -108,74 +91,33 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     storage.save_matching_fields(transaction_id2, &matching_fields2).await?;
     
     // Verify nodes after second save
-    let updated_nodes = sqlx::query!(
-        r#"
-        SELECT matcher, value
-        FROM match_node
-        ORDER BY matcher
-        "#
-    )
-    .fetch_all(&pool)
-    .await?;
+    let updated_nodes = common::test_helpers::get_all_match_nodes(&pool).await?;
     
     // Should now have 4 nodes (the 3 from before plus the new ip.address)
     assert_eq!(updated_nodes.len(), 4, "Expected 4 match nodes after second save");
     
     // Verify connections between transactions
-    let common_node_id = sqlx::query!(
-        r#"
-        SELECT id
-        FROM match_node
-        WHERE matcher = 'customer.email' AND value = 'test@example.com'
-        "#
-    )
-    .fetch_one(&pool)
-    .await?
-    .id;
+    let common_node_id = common::test_helpers::get_match_node_id(&pool, "customer.email", "test@example.com").await?;
     
     // Check that both transactions are connected to the same node
-    let connected_transactions = sqlx::query!(
-        r#"
-        SELECT transaction_id
-        FROM match_node_transactions
-        WHERE node_id = $1
-        ORDER BY transaction_id
-        "#,
-        common_node_id
-    )
-    .fetch_all(&pool)
-    .await?;
+    let connected_transactions = common::test_helpers::get_transactions_for_match_node(&pool, common_node_id).await?;
     
     assert_eq!(connected_transactions.len(), 2, "Expected both transactions to be connected to the common node");
-    assert_eq!(connected_transactions[0].transaction_id, transaction_id1 as i64);
-    assert_eq!(connected_transactions[1].transaction_id, transaction_id2 as i64);
+    assert_eq!(connected_transactions[0], transaction_id1 as i64);
+    assert_eq!(connected_transactions[1], transaction_id2 as i64);
     
     // Test idempotency - saving the same fields again should not create duplicates
     storage.save_matching_fields(transaction_id1, &matching_fields1).await?;
     
     // Check that node count hasn't changed
-    let final_node_count = sqlx::query!(
-        r#"
-        SELECT COUNT(*) as count
-        FROM match_node
-        "#
-    )
-    .fetch_one(&pool)
-    .await?;
+    let final_node_count = common::test_helpers::count_match_nodes(&pool).await?;
     
-    assert_eq!(final_node_count.count.unwrap(), 4, "Node count should not change after duplicate save");
+    assert_eq!(final_node_count, 4, "Node count should not change after duplicate save");
     
     // Check that node-transaction connections haven't duplicated
-    let final_connection_count = sqlx::query!(
-        r#"
-        SELECT COUNT(*) as count
-        FROM match_node_transactions
-        "#
-    )
-    .fetch_one(&pool)
-    .await?;
+    let final_connection_count = common::test_helpers::count_all_match_node_transactions(&pool).await?;
     
-    assert_eq!(final_connection_count.count.unwrap(), 5, "Expected 5 total node-transaction connections");
+    assert_eq!(final_connection_count, 5, "Expected 5 total node-transaction connections");
     
     Ok(())
 }
@@ -189,7 +131,7 @@ async fn test_save_matching_fields_empty() -> Result<(), Box<dyn Error + Send + 
     truncate_processing_tables(&pool).await?;
     
     // Create a transaction
-    let transaction_id = storage.insert_transaction().await?;
+    let transaction_id = create_test_transaction(&storage).await?;
     
     // Create empty matching fields list
     let empty_fields: Vec<MatchingField> = vec![];
@@ -198,28 +140,14 @@ async fn test_save_matching_fields_empty() -> Result<(), Box<dyn Error + Send + 
     storage.save_matching_fields(transaction_id, &empty_fields).await?;
     
     // Verify no nodes were created
-    let node_count = sqlx::query!(
-        r#"
-        SELECT COUNT(*) as count
-        FROM match_node
-        "#
-    )
-    .fetch_one(&pool)
-    .await?;
+    let node_count = common::test_helpers::count_match_nodes(&pool).await?;
     
-    assert_eq!(node_count.count.unwrap(), 0, "No nodes should be created with empty fields");
+    assert_eq!(node_count, 0, "No nodes should be created with empty fields");
     
     // Verify no connections were created
-    let connection_count = sqlx::query!(
-        r#"
-        SELECT COUNT(*) as count
-        FROM match_node_transactions
-        "#
-    )
-    .fetch_one(&pool)
-    .await?;
+    let connection_count = common::test_helpers::count_all_match_node_transactions(&pool).await?;
     
-    assert_eq!(connection_count.count.unwrap(), 0, "No connections should be created with empty fields");
+    assert_eq!(connection_count, 0, "No connections should be created with empty fields");
     
     Ok(())
 } 

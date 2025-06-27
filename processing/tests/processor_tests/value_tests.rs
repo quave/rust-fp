@@ -1,7 +1,7 @@
-use std::error::Error;
-use processing::model::{Processible, FeatureValue};
+use processing::model::Processible;
 use super::mocks::TestTransaction;
-use common::test_helpers::{TestResult, TestError, test_assert_eq, test_feature_value};
+use common::{test_assert_eq, test_feature_value, test_assert};
+use common::test_helpers::{TestResult, TestError};
 
 #[tokio::test]
 async fn test_feature_value_types() -> TestResult {

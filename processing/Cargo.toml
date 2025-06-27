@@ -10,7 +10,7 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yml = { workspace = true }
 dotenvy = { workspace = true }
 tokio = { workspace = true }
 sqlx = { workspace = true, features = [
@@ -35,15 +35,16 @@ axum = { workspace = true, features = ["macros"] }
 tower-http = { workspace = true, features = ["trace"] }
 tower = { workspace = true }
 clap = { version = "4.4", features = ["derive"] }
-jsonschema = "0.29.1"
+jsonschema = "0.30.0"
 http.workspace = true
 evalexpr.workspace = true
 proc-macros = { path = "../proc-macros" }
 
 [dev-dependencies]
-common = { path = "../common", features = ["async-sqlx", "processing-mocks"] }
+common = { path = "../common", features = ["processing-mocks"] }
 serial_test = "3.2.0"
 http-body-util = "0.1.0"
+mockall = { workspace = true }
 
 [lib]
 name = "processing"

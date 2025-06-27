@@ -55,7 +55,7 @@ To implement a new model type, you must:
 ## Technology Stack
 - **Backend**: Rust with Tokio async runtime
 - **Database**: PostgreSQL with SQLx for database access
-- **API**: Axum or Actix Web for REST services
+- **API**: Axum for REST services
 - **Web Frontend**: React with TypeScript and Vite
 - **Config**: YAML-based configuration with environment overrides
 - **Container**: Docker and Docker Compose

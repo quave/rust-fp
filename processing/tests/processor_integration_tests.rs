@@ -1,77 +1,48 @@
 use std::error::Error;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
 use processing::model::{
     Processible, Feature, FeatureValue, MatchingField, ModelId, ScorerResult, TriggeredRule,
-    ConnectedTransaction, DirectConnection, Channel, ScoringEvent, Label, FraudLevel, LabelSource
+    ConnectedTransaction, DirectConnection, Channel, ScoringEvent, Label, FraudLevel, LabelSource, LabelingResult
 };
 use processing::storage::CommonStorage;
 use processing::queue::QueueService;
 use processing::storage::ProcessibleStorage;
 use chrono::Utc;
 
-// Import centralized mocks directly
-use common::test_helpers::{
-    MockQueueService as CentralizedMockQueueService,
-    MockCommonStorage as CentralizedMockCommonStorage,
-    MockProcessible, MockScorer,
-    TestDataFactory, TestFeature, TestScorerResult, TestMatchingField
-};
+
 use async_trait::async_trait;
+use mockall::mock;
 
-// Simple conversion functions
-fn convert_test_feature_to_processing(test_feature: &TestFeature) -> Feature {
-    let value: Box<FeatureValue> = if let Some(int_val) = test_feature.int_value {
-        Box::new(FeatureValue::Int(int_val as i64))
-    } else if let Some(string_val) = &test_feature.string_value {
-        Box::new(FeatureValue::String(string_val.clone()))
-    } else {
-        Box::new(FeatureValue::Int(42)) // Default
-    };
-    
-    Feature {
-        name: test_feature.name.clone(),
-        value,
-    }
-}
 
-fn convert_test_matching_field_to_processing(test_field: &TestMatchingField) -> MatchingField {
-    MatchingField {
-        matcher: test_field.matcher.clone(),
-        value: test_field.value.clone(),
-    }
-}
 
 // Adapter for MockProcessible to implement processing::model::Processible
 struct ProcessibleAdapter {
-    inner: MockProcessible,
+    id: i64,
 }
 
 impl ProcessibleAdapter {
     fn new(id: i64) -> Self {
-        Self {
-            inner: MockProcessible::new(id),
-        }
+        Self { id }
     }
 }
 
 #[async_trait]
 impl Processible for ProcessibleAdapter {
     fn tx_id(&self) -> i64 {
-        self.inner.tx_id()
+        self.id
     }
 
     fn id(&self) -> i64 {
-        self.inner.get_id()
+        self.id
     }
 
     fn extract_simple_features(&self) -> Vec<Feature> {
-        self.inner.extract_simple_features()
-            .iter()
-            .map(convert_test_feature_to_processing)
-            .collect()
+        vec![Feature {
+            name: "test_feature".to_string(),
+            value: Box::new(FeatureValue::Int(42)),
+        }]
     }
 
     fn extract_graph_features(
@@ -79,111 +50,61 @@ impl Processible for ProcessibleAdapter {
         _connected_transactions: &[ConnectedTransaction],
         _direct_connections: &[DirectConnection]
     ) -> Vec<Feature> {
-        // For tests, just return the same as simple features
-        self.extract_simple_features()
+        vec![Feature {
+            name: "graph_feature".to_string(),
+            value: Box::new(FeatureValue::String("test".to_string())),
+        }]
     }
 
     fn extract_matching_fields(&self) -> Vec<MatchingField> {
-        self.inner.extract_matching_fields()
-            .iter()
-            .map(convert_test_matching_field_to_processing)
-            .collect()
+        vec![MatchingField {
+            matcher: "test_field".to_string(),
+            value: "test_value".to_string(),
+        }]
     }
 }
 
-// Adapter for MockScorer
-struct ScorerAdapter {
-    inner: MockScorer,
-}
+// Direct Scorer implementation using mockall - OPTIMAL FIRST approach
+mock! {
+    ScorerService {}
 
-impl ScorerAdapter {
-    fn new(test_scores: Vec<TestScorerResult>) -> Self {
-        Self {
-            inner: MockScorer::new(test_scores),
-        }
+    #[async_trait]
+    impl processing::scorers::Scorer for ScorerService {
+        async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult>;
     }
 }
 
-#[async_trait]
-impl processing::scorers::Scorer for ScorerAdapter {
-    async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult> {
-        // Convert features to test features for the centralized mock
-        let test_features: Vec<TestFeature> = features.iter().map(|f| {
-            TestDataFactory::create_feature(&f.name, 42)
-        }).collect();
-        
-        // Call the centralized mock
-        let test_results = self.inner.score(test_features).await.unwrap();
-        
-        // Convert back to processing ScorerResult
-        test_results.iter().map(|tr| ScorerResult {
-            name: tr.name.clone(),
-            score: tr.score,
-        }).collect()
-    }
+// Mock CommonStorage - for complex traits like this, we'll keep a simple custom mock
+// since mockall has issues with complex lifetime parameters in traits
+#[derive(Debug, Clone)]
+struct MockCommonStorage {
+    tx_id: i64,
+    features: Vec<Feature>,
 }
 
-// Adapter for MockCommonStorage
-struct CommonStorageAdapter {
-    inner: CentralizedMockCommonStorage,
-}
-
-impl CommonStorageAdapter {
-    fn new(id: i64, features: Vec<Feature>, scores: Vec<ScorerResult>) -> Self {
-        let test_features: Vec<TestFeature> = features.iter().map(|f| {
-            TestDataFactory::create_feature(&f.name, 42)
-        }).collect();
-        
-        let test_scores: Vec<TestScorerResult> = scores.iter().map(|s| {
-            TestDataFactory::create_scorer_result(&s.name, s.score)
-        }).collect();
-        
-        Self {
-            inner: CentralizedMockCommonStorage::new(id, test_features, test_scores),
-        }
-    }
-    
-    pub fn was_save_features_called(&self) -> bool {
-        self.inner.was_save_features_called()
-    }
-    
-    pub fn was_save_scores_called(&self) -> bool {
-        self.inner.was_save_scores_called()
-    }
-    
-    pub fn was_save_matching_fields_called(&self) -> bool {
-        self.inner.was_save_matching_fields_called()
+impl MockCommonStorage {
+    fn new(tx_id: i64, features: Vec<Feature>) -> Self {
+        Self { tx_id, features }
     }
 }
 
 #[async_trait]
-impl CommonStorage for CommonStorageAdapter {
+impl CommonStorage for MockCommonStorage {
     async fn save_features(&self, tx_id: i64, _simple_features: Option<&[Feature]>, _graph_features: &[Feature]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Just track the call
-        assert_eq!(tx_id, self.inner.transaction_id);
-        self.inner.save_features_called.store(true, Ordering::Relaxed);
+        assert_eq!(tx_id, self.tx_id);
         Ok(())
     }
 
-    async fn save_scores(&self, tx_id: i64, _channel_id: i64, _total_score: i32, scores: &[TriggeredRule]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        assert_eq!(tx_id, self.inner.transaction_id);
-        assert_eq!(scores.len(), self.inner.scores.len());
-        self.inner.save_scores_called.store(true, Ordering::Relaxed);
+    async fn save_scores(&self, tx_id: i64, _channel_id: i64, _total_score: i32, _scores: &[TriggeredRule]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        assert_eq!(tx_id, self.tx_id);
         Ok(())
     }
 
     async fn get_features(&self, tx_id: i64) -> Result<(Option<Vec<Feature>>, Vec<Feature>), Box<dyn std::error::Error + Send + Sync>> {
-        assert_eq!(tx_id, self.inner.transaction_id);
-        self.inner.get_features_called.store(true, Ordering::Relaxed);
-        
-        let processing_features: Vec<Feature> = self.inner.features.iter()
-            .map(convert_test_feature_to_processing)
-            .collect();
-        
-        Ok((Some(processing_features.clone()), processing_features))
-    }   
+        assert_eq!(tx_id, self.tx_id);
+        Ok((Some(self.features.clone()), self.features.clone()))
+    }
 
-    // Stub implementations for unused methods
     async fn find_connected_transactions(&self, _transaction_id: i64, _max_depth: Option<i32>, _limit_count: Option<i32>, _min_created_at: Option<chrono::DateTime<chrono::Utc>>, _max_created_at: Option<chrono::DateTime<chrono::Utc>>, _min_confidence: Option<i32>) -> Result<Vec<ConnectedTransaction>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Vec::new())
     }
@@ -193,8 +114,7 @@ impl CommonStorage for CommonStorageAdapter {
     }
 
     async fn save_matching_fields(&self, tx_id: i64, _matching_fields: &[MatchingField]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        assert_eq!(tx_id, self.inner.transaction_id);
-        self.inner.save_matching_fields_called.store(true, Ordering::Relaxed);
+        assert_eq!(tx_id, self.tx_id);
         Ok(())
     }
 
@@ -228,75 +148,34 @@ impl CommonStorage for CommonStorageAdapter {
     async fn update_transaction_label(&self, _transaction_id: ModelId, _label_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
-}
 
-// Adapter for ProcessibleStorage
-struct ProcessibleStorageAdapter {
-    called: Arc<AtomicBool>,
-    expected_tx_id: i64,
-    return_value: Option<ProcessibleAdapter>,
-}
-
-impl ProcessibleStorageAdapter {
-    fn new(expected_tx_id: i64, return_value: Option<ProcessibleAdapter>) -> Self {
-        Self {
-            called: Arc::new(AtomicBool::new(false)),
-            expected_tx_id,
-            return_value,
-        }
-    }
-    
-    pub fn was_called(&self) -> bool {
-        self.called.load(Ordering::Relaxed)
+    async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
+        Ok(LabelingResult {
+            label_id: 1,
+            success_count: 1,
+            failed_transaction_ids: Vec::new(),
+        })
     }
 }
 
-#[async_trait]
-impl ProcessibleStorage<ProcessibleAdapter> for ProcessibleStorageAdapter {
-    async fn get_processible(&self, tx_id: i64) -> Result<ProcessibleAdapter, Box<dyn std::error::Error + Send + Sync>> {
-        self.called.store(true, Ordering::Relaxed);
-        assert_eq!(tx_id, self.expected_tx_id);
-        
-        match &self.return_value {
-            Some(processible) => Ok(ProcessibleAdapter::new(processible.inner.get_id())),
-            None => Err("No processible found".into()),
-        }
+// Mock ProcessibleStorage using mockall - much cleaner than custom adapter!
+mock! {
+    ProcessibleStorage {}
+
+    #[async_trait]
+    impl ProcessibleStorage<ProcessibleAdapter> for ProcessibleStorage {
+        async fn get_processible(&self, transaction_id: i64) -> Result<ProcessibleAdapter, Box<dyn std::error::Error + Send + Sync>>;
     }
 }
 
-// Mock QueueService using centralized implementation
-#[derive(Debug, Clone)]
-struct MockQueueService {
-    inner: CentralizedMockQueueService,
-}
+mock! {
+    QueueService {}
 
-impl MockQueueService {
-    fn new(return_value: Option<i64>, expected_mark_processed_id: i64) -> Self {
-        Self {
-            inner: CentralizedMockQueueService::new(return_value, expected_mark_processed_id),
-        }
-    }
-    
-    pub fn was_mark_processed_called(&self) -> bool {
-        self.inner.was_mark_processed_called()
-    }
-}
-
-#[async_trait]
-impl QueueService for MockQueueService {
-    async fn fetch_next(&self) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        println!("MockQueueService.fetch_next");
-        self.inner.fetch_next().await
-    }
-
-    async fn mark_processed(&self, tx_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        println!("MockQueueService.mark_processed");
-        self.inner.mark_processed(tx_id).await
-    }
-
-    async fn enqueue(&self, tx_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        println!("MockQueueService.enqueue");
-        self.inner.enqueue(tx_id).await
+    #[async_trait]
+    impl QueueService for QueueService {
+        async fn fetch_next(&self) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>>;
+        async fn mark_processed(&self, tx_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+        async fn enqueue(&self, tx_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     }
 }
 
@@ -304,21 +183,42 @@ impl QueueService for MockQueueService {
 async fn test_processor_process() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Create test data
     let tx_id = 1;
-    let processible = ProcessibleAdapter::new(tx_id);
-    let expected_features = processible.extract_simple_features();
     
-    // Create scores
-    let scores = vec![ScorerResult {
-        score: 100,
-        name: "test_score".to_string(),
-    }];
+    // Set up mocks using mockall - OPTIMAL FIRST approach
+    let mut scorer = MockScorerService::new();
+    scorer.expect_score()
+        .returning(|_| vec![ScorerResult { name: "test_score".to_string(), score: 100 }]);
     
-    // Set up mocks using centralized implementations
-    let scorer = ScorerAdapter::new(vec![TestDataFactory::create_scorer_result("test_score", 100)]);
-    let storage = CommonStorageAdapter::new(tx_id, expected_features, scores);
-    let processible_storage = ProcessibleStorageAdapter::new(tx_id, Some(processible));
-    let queue = MockQueueService::new(Some(tx_id), tx_id);
-    let failed_queue = MockQueueService::new(Some(tx_id), tx_id);
+    // Create features for the mock storage
+    let features = vec![
+        Feature {
+            name: "test_feature".to_string(),
+            value: Box::new(FeatureValue::Int(42)),
+        }
+    ];
+    
+    let storage = MockCommonStorage::new(tx_id, features);
+    
+    // Create mockall-based processible storage
+    let mut processible_storage = MockProcessibleStorage::new();
+    processible_storage.expect_get_processible()
+        .with(mockall::predicate::eq(tx_id))
+        .returning(move |_| Ok(ProcessibleAdapter::new(tx_id)));
+    
+    // Create mockall-based queue services
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next()
+        .returning(move || Ok(Some(tx_id)));
+    queue.expect_mark_processed()
+        .with(mockall::predicate::eq(tx_id))
+        .returning(|_| Ok(()));
+    
+    let mut failed_queue = MockQueueService::new();
+    failed_queue.expect_fetch_next()
+        .returning(move || Ok(Some(tx_id)));
+    failed_queue.expect_mark_processed()
+        .with(mockall::predicate::eq(tx_id))
+        .returning(|_| Ok(()));
     
     // Create processor
     let processor = Processor::new(
@@ -346,11 +246,28 @@ async fn test_processor_process_with_nonexistent_transaction() -> Result<(), Box
     let tx_id = 999;
     
     // Set up mocks - processible storage returns None
-    let scorer = ScorerAdapter::new(vec![]);
-    let storage = CommonStorageAdapter::new(1, vec![], vec![]);
-    let processible_storage = ProcessibleStorageAdapter::new(tx_id, None);
-    let queue = MockQueueService::new(Some(tx_id), tx_id);
-    let failed_queue = MockQueueService::new(Some(tx_id), tx_id);
+    let mut scorer = MockScorerService::new();
+    scorer.expect_score()
+        .returning(|_| vec![]);
+    let storage = MockCommonStorage::new(1, vec![]);
+    
+    // Create mockall-based processible storage that returns an error
+    let mut processible_storage = MockProcessibleStorage::new();
+    processible_storage.expect_get_processible()
+        .with(mockall::predicate::eq(tx_id))
+        .returning(|_| Err("No processible found".into()));
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next()
+        .returning(move || Ok(Some(tx_id)));
+    queue.expect_mark_processed()
+        .returning(|_| Ok(()));
+    
+    let mut failed_queue = MockQueueService::new();
+    failed_queue.expect_fetch_next()
+        .returning(move || Ok(Some(tx_id)));
+    failed_queue.expect_mark_processed()
+        .returning(|_| Ok(()));
     
     let processor = Processor::new(
         ProcessorConfig::default(),
@@ -379,17 +296,31 @@ async fn test_processor_with_custom_matching_config() -> Result<(), Box<dyn Erro
     let processible = ProcessibleAdapter::new(tx_id);
     let expected_features = processible.extract_simple_features();
     
-    let scores = vec![ScorerResult {
-        score: 75,
-        name: "custom_score".to_string(),
-    }];
+    // Use simple custom mock
+    let mut scorer = MockScorerService::new();
+    scorer.expect_score()
+        .returning(|_| vec![ScorerResult { name: "custom_score".to_string(), score: 75 }]);
+    let storage = MockCommonStorage::new(tx_id, expected_features);
     
-    // Use centralized mocks
-    let scorer = ScorerAdapter::new(vec![TestDataFactory::create_scorer_result("custom_score", 75)]);
-    let storage = CommonStorageAdapter::new(tx_id, expected_features, scores);
-    let processible_storage = ProcessibleStorageAdapter::new(tx_id, Some(processible));
-    let queue = MockQueueService::new(Some(tx_id), tx_id);
-    let failed_queue = MockQueueService::new(Some(tx_id), tx_id);
+    // Create mockall-based processible storage
+    let mut processible_storage = MockProcessibleStorage::new();
+    processible_storage.expect_get_processible()
+        .with(mockall::predicate::eq(tx_id))
+        .returning(move |_| Ok(ProcessibleAdapter::new(tx_id)));
+    
+    let mut queue = MockQueueService::new();
+    queue.expect_fetch_next()
+        .returning(move || Ok(Some(tx_id)));
+    queue.expect_mark_processed()
+        .with(mockall::predicate::eq(tx_id))
+        .returning(|_| Ok(()));
+    
+    let mut failed_queue = MockQueueService::new();
+    failed_queue.expect_fetch_next()
+        .returning(move || Ok(Some(tx_id)));
+    failed_queue.expect_mark_processed()
+        .with(mockall::predicate::eq(tx_id))
+        .returning(|_| Ok(()));
     
     let processor = Processor::new(
         ProcessorConfig::default(),

@@ -9,7 +9,6 @@ use processing::{
         Feature, FeatureValue, ModelId, Processible, MatchingField, ScorerResult, ConnectedTransaction, DirectConnection, 
         TriggeredRule, Channel, ScoringEvent, Label, FraudLevel, LabelSource
     },
-    scorers::Scorer,
     queue::QueueService,
     storage::{ProcessibleStorage, CommonStorage},
 };
@@ -484,61 +483,53 @@ impl ProcessibleStorage<TestTransaction> for MockProcessibleStorage {
     }
 }
 
-// Mock Queue Service
-#[derive(Debug, Clone)]
-pub struct MockQueue {
-    pub next_id: Option<ModelId>,
-}
+// Direct MockQueueService implementation using mockall - OPTIMAL FIRST approach
+use mockall::mock;
 
-impl MockQueue {
-    pub fn new(next_id: Option<ModelId>) -> Self {
-        Self { next_id }
+mock! {
+    pub QueueService {}
+
+    #[async_trait]
+    impl QueueService for QueueService {
+        async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>>;
+        async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
+        async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
     }
 }
 
-#[async_trait]
-impl QueueService for MockQueue {
-    async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>> {
-        Ok(self.next_id)
-    }
+// Direct MockScorer implementation using mockall - OPTIMAL FIRST approach
+mock! {
+    pub Scorer {}
 
-    async fn mark_processed(&self, _id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
-    }
-
-    async fn enqueue(&self, _id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
+    #[async_trait]
+    impl processing::scorers::Scorer for Scorer {
+        async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult>;
     }
 }
 
-// Mock Scorer
-#[derive(Debug, Clone)]
-pub struct MockScorer {
-    pub results: Vec<ScorerResult>,
-}
-
-impl MockScorer {
-    pub fn new(results: Vec<ScorerResult>) -> Self {
-        Self { results }
-    }
-
-    pub fn high_value_scorer() -> Self {
-        Self::new(vec![
+// Helper functions for common scorer configurations
+pub fn create_high_value_scorer() -> MockScorer {
+    let mut scorer = MockScorer::new();
+    scorer.expect_score()
+        .returning(|_| vec![
             ScorerResult { score: 85, name: "high_amount_score".to_string() },
             ScorerResult { score: 70, name: "premium_category_score".to_string() },
-        ])
-    }
-
-    pub fn low_value_scorer() -> Self {
-        Self::new(vec![
-            ScorerResult { score: 25, name: "low_amount_score".to_string() },
-        ])
-    }
+        ]);
+    scorer
 }
 
-#[async_trait]
-impl Scorer for MockScorer {
-    async fn score(&self, _features: Vec<Feature>) -> Vec<ScorerResult> {
-        self.results.clone()
-    }
+pub fn create_low_value_scorer() -> MockScorer {
+    let mut scorer = MockScorer::new();
+    scorer.expect_score()
+        .returning(|_| vec![
+            ScorerResult { score: 25, name: "low_amount_score".to_string() },
+        ]);
+    scorer
+}
+
+pub fn create_empty_scorer() -> MockScorer {
+    let mut scorer = MockScorer::new();
+    scorer.expect_score()
+        .returning(|_| vec![]);
+    scorer
 } 

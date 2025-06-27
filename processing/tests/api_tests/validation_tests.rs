@@ -24,8 +24,9 @@ async fn test_label_transaction_invalid_json() -> TestResult {
     let app = create_test_app(web_storage, common_storage);
     
     // Act: Send a request with invalid JSON using safe request builder
-    let request = test_utils::build_request("POST", "/transaction/1/label", Some("{invalid json}".to_string()))?;
-    let request = Request::from_parts(request.into_parts().0, Body::from(request.into_body()));
+    let base_request = test_utils::build_request("POST", "/transaction/1/label", Some("{invalid json}".to_string()))?;
+    let (parts, body) = base_request.into_parts();
+    let request = Request::from_parts(parts, Body::from(body));
     
     let response = app.oneshot(request).await
         .map_err(|e| common::test_helpers::TestError::generic(format!("Request failed: {}", e)))?;

@@ -10,7 +10,42 @@ use processing::{
 use async_trait::async_trait;
 
 // Import and re-export centralized mocks for use in API tests
-pub use common::test_helpers::{MockWebTransaction, MockWebStorage};
+// Simple local mock implementations - TODO: Move to common when centralized
+#[derive(Clone, serde::Serialize)]
+pub struct MockWebTransaction {
+    pub id: ModelId,
+}
+
+impl MockWebTransaction {
+    pub fn new(id: ModelId) -> Self {
+        Self { id }
+    }
+    
+    pub fn get_id(&self) -> ModelId {
+        self.id
+    }
+}
+
+pub struct MockWebStorage {
+    pub transactions: Vec<MockWebTransaction>,
+}
+
+impl MockWebStorage {
+    pub fn new(transactions: Vec<MockWebTransaction>) -> Self {
+        Self { transactions }
+    }
+    
+    pub async fn get_transactions(&self) -> Result<Vec<MockWebTransaction>, Box<dyn Error + Send + Sync>> {
+        Ok(self.transactions.clone())
+    }
+    
+    pub async fn get_transaction(&self, transaction_id: ModelId) -> Result<MockWebTransaction, Box<dyn Error + Send + Sync>> {
+        self.transactions.iter()
+            .find(|t| t.id == transaction_id)
+            .cloned()
+            .ok_or_else(|| format!("Transaction {} not found", transaction_id).into())
+    }
+}
 
 // Implement the required traits for MockWebTransaction
 #[async_trait]
@@ -22,10 +57,12 @@ impl WebTransaction for MockWebTransaction {
 
 impl ModelRegistryProvider for MockWebTransaction {
     fn get_registry() -> &'static ModelRegistry {
+        use std::sync::LazyLock;
         // Return a static registry for testing
-        static REGISTRY: ModelRegistry = ModelRegistry {
+        static REGISTRY: LazyLock<ModelRegistry> = LazyLock::new(|| ModelRegistry {
             models: std::collections::HashMap::new(),
-        };
+            root_model: "test_transaction",
+        });
         &REGISTRY
     }
 }
