@@ -1,5 +1,5 @@
 use ecom::ecom_import_model::{ImportOrder, ImportOrderItem, ImportCustomerData, ImportBillingData};
-use ecom::ecom_db_model::Order;
+use ecom::models::Order;
 use processing::storage::{ImportableStorage, WebStorage};
 use std::error::Error;
 use common::test_helpers::{generate_unique_id, get_test_database_url};

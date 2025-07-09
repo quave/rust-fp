@@ -328,30 +328,32 @@ impl CommonStorage for ProdCommonStorage {
     ) -> Result<Vec<ConnectedTransaction>, Box<dyn Error + Send + Sync>> {
         // Convert Option parameters to SQL nulls if None
         let min_confidence_sql = min_confidence.unwrap_or(0);
-        
-        // Convert DateTime<Utc> to NaiveDateTime for PostgreSQL compatibility
+                
+        // Convert DateTime<Utc> to NaiveDateTime for PostgreSQL TIMESTAMP (without time zone)
         let min_created_at_naive = min_created_at.map(|dt| dt.naive_utc());
         let max_created_at_naive = max_created_at.map(|dt| dt.naive_utc());
         
         // Call the SQL function with explicit type casts for PostgreSQL
+        // The function now expects 7 parameters (added min_connections parameter)
         let rows = sqlx::query!(
             r#"
             SELECT 
                 transaction_id, 
                 path_matchers, 
                 path_values, 
-                depth, 
+                depth,
                 confidence, 
                 importance, 
-                created_at
-            FROM find_connected_transactions($1, $2, $3, $4, $5, $6)
+                created_at as "created_at: chrono::NaiveDateTime"
+            FROM find_connected_transactions($1, $2, $3, $4, $5, $6, $7)
             "#,
             transaction_id,
             max_depth,
             limit_count,
-            min_created_at_naive,
-            max_created_at_naive,
-            min_confidence_sql
+            min_created_at_naive as Option<chrono::NaiveDateTime>,
+            max_created_at_naive as Option<chrono::NaiveDateTime>,
+            min_confidence_sql,
+            1 // min_connections parameter (kept for backward compatibility)
         )
         .fetch_all(&self.pool)
         .await?;
@@ -400,7 +402,7 @@ impl CommonStorage for ProdCommonStorage {
                 mn.matcher as matcher,
                 mn.confidence as confidence,
                 mn.importance as importance,
-                t2.created_at::timestamptz as created_at
+                t2.created_at as "created_at: chrono::NaiveDateTime"
             FROM transactions t1
             JOIN match_node_transactions mnt1 ON t1.id = mnt1.transaction_id
             JOIN match_node mn ON mnt1.node_id = mn.id
@@ -417,8 +419,8 @@ impl CommonStorage for ProdCommonStorage {
         // Map SQL results to Rust structs
         let mut direct_connections = Vec::new();
         for row in rows {
-            // Use current time as fallback if created_at is null
-            let created_at = row.created_at.unwrap_or_else(|| chrono::Utc::now());
+            // Convert NaiveDateTime to DateTime<Utc>
+            let created_at = DateTime::<Utc>::from_naive_utc_and_offset(row.created_at, Utc);
             
             direct_connections.push(DirectConnection {
                 transaction_id: row.transaction_id,
@@ -525,7 +527,7 @@ impl CommonStorage for ProdCommonStorage {
     ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, name, model_id, created_at
+            SELECT id, name, model_id, created_at as "created_at: chrono::NaiveDateTime"
             FROM channels
             WHERE model_id = $1
             "#,
@@ -553,7 +555,7 @@ impl CommonStorage for ProdCommonStorage {
     ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, transaction_id, channel_id, total_score, created_at
+            SELECT id, transaction_id, channel_id, total_score, created_at as "created_at: chrono::NaiveDateTime"
             FROM scoring_events
             WHERE transaction_id = $1
             ORDER BY created_at DESC
@@ -612,9 +614,6 @@ impl CommonStorage for ProdCommonStorage {
         let fraud_level_str = format!("{:?}", label.fraud_level);
         let label_source_str = format!("{:?}", label.label_source);
         
-        // Convert DateTime<Utc> to naive_utc for PostgreSQL compatibility
-        let created_at_naive = label.created_at.naive_utc();
-        
         let row = sqlx::query!(
             r#"
             INSERT INTO labels (
@@ -626,7 +625,7 @@ impl CommonStorage for ProdCommonStorage {
             label.fraud_category,
             label_source_str,
             label.labeled_by,
-            created_at_naive
+            label.created_at as chrono::DateTime<chrono::Utc>
         )
         .fetch_one(&self.pool)
         .await?;
@@ -640,7 +639,7 @@ impl CommonStorage for ProdCommonStorage {
     ) -> Result<Label, Box<dyn Error + Send + Sync>> {
         let row = sqlx::query!(
             r#"
-            SELECT id, fraud_level, fraud_category, label_source, labeled_by, created_at
+            SELECT id, fraud_level, fraud_category, label_source, labeled_by, created_at as "created_at: chrono::NaiveDateTime"
             FROM labels
             WHERE id = $1
             "#,

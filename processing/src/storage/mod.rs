@@ -1,9 +1,9 @@
 // Re-export all storage-related modules
-mod common;
-mod web;
-mod processible;
-mod importable;
-mod implementation;
+pub mod common;
+pub mod implementation;
+pub mod importable;
+pub mod processible;
+pub mod web;
 
 // Re-export storage traits and implementations
 pub use common::*;

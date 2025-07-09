@@ -127,7 +127,7 @@ pub struct MockSaveLabelErrorStorage;
 #[async_trait::async_trait]
 impl CommonStorage for MockSaveLabelErrorStorage {
     async fn save_label(&self, _label: &Label) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        Err("Save label failed".into())
+        Err("Failed to save label".into())
     }
 
     async fn update_transaction_label(&self, _transaction_id: ModelId, _label_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {

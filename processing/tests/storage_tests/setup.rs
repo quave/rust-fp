@@ -80,8 +80,8 @@ pub async fn save_raw_features(
     
     // Convert the JSON to Feature structs - this would be better done through 
     // proper deserialization, but for test purposes we'll use the storage layer directly
-    let empty_simple_features: Option<&[Feature]> = None;
-    let empty_graph_features: Vec<Feature> = vec![];
+    let _empty_simple_features: Option<&[Feature]> = None;
+    let _empty_graph_features: Vec<Feature> = vec![];
     
     // For now, we'll still use the raw approach since we're testing raw feature insertion
     // In a production refactor, this would be replaced with proper Feature objects

@@ -467,7 +467,6 @@ mod sqlx_helpers {
     use std::path::PathBuf;
     use std::error::Error;
     use serde_json::Value;
-    use chrono::NaiveDate;
 
     /// Create a database connection pool for testing
     pub async fn create_test_pool() -> Result<PgPool, Box<dyn Error + Send + Sync>> {
@@ -585,10 +584,10 @@ mod sqlx_helpers {
         transaction_data: &[(i64, &str)]
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         for (id, created_at) in transaction_data {
-            // Parse the string timestamp into a proper datetime
-            let parsed_date = NaiveDate::parse_from_str(created_at, "%Y-%m-%d")?;
-            let parsed_time = parsed_date.and_hms_opt(0, 0, 0).unwrap();
-            sqlx::query!("INSERT INTO transactions (id, created_at) VALUES ($1, $2)", id, parsed_time)
+            // Use raw SQL to avoid datetime type issues
+            let query = format!("INSERT INTO transactions (id, created_at) VALUES ($1, '{} 00:00:00')", created_at);
+            sqlx::query(&query)
+                .bind(id)
                 .execute(pool).await?;
         }
         Ok(())

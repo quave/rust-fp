@@ -52,23 +52,28 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     // Verify 3 nodes were created with correct values
     assert_eq!(saved_nodes.len(), 3, "Expected 3 match nodes to be created");
     
-    // Verify the billing.payment_details node
-    assert_eq!(saved_nodes[0].0, "billing.payment_details");
-    assert_eq!(saved_nodes[0].1, "4111-1111-1111-1111");
-    assert_eq!(saved_nodes[0].2, 100); // Default from ProdCommonStorage
-    assert_eq!(saved_nodes[0].3, 80);  // Default from ProdCommonStorage
+    // Verify nodes were created with correct values (order-independent)
     
-    // Verify the customer.email node
-    assert_eq!(saved_nodes[1].0, "customer.email");
-    assert_eq!(saved_nodes[1].1, "test@example.com");
-    assert_eq!(saved_nodes[1].2, 100); // Default from ProdCommonStorage
-    assert_eq!(saved_nodes[1].3, 90);  // Default from ProdCommonStorage
+    // Find the billing.payment_details node
+    let billing_node = saved_nodes.iter().find(|node| 
+        node.0 == "billing.payment_details" && node.1 == "4111-1111-1111-1111"
+    ).expect("billing.payment_details node should exist");
+    assert_eq!(billing_node.2, 100); // Default from ProdCommonStorage
+    assert_eq!(billing_node.3, 80);  // Default from ProdCommonStorage
     
-    // Verify the custom matcher node - uses default values since it's not in the config
-    assert_eq!(saved_nodes[2].0, "test.matcher");
-    assert_eq!(saved_nodes[2].1, "test-value");
-    assert_eq!(saved_nodes[2].2, 80);  // Default confidence
-    assert_eq!(saved_nodes[2].3, 50);  // Default importance
+    // Find the customer.email node
+    let email_node = saved_nodes.iter().find(|node| 
+        node.0 == "customer.email" && node.1 == "test@example.com"
+    ).expect("customer.email node should exist");
+    assert_eq!(email_node.2, 100); // Default from ProdCommonStorage
+    assert_eq!(email_node.3, 90);  // Default from ProdCommonStorage
+    
+    // Find the custom matcher node - uses default values since it's not in the config
+    let test_node = saved_nodes.iter().find(|node| 
+        node.0 == "test.matcher" && node.1 == "test-value"
+    ).expect("test.matcher node should exist");
+    assert_eq!(test_node.2, 80);  // Default confidence
+    assert_eq!(test_node.3, 50);  // Default importance
     
     // Verify node-transaction connections
     let connection_count = common::test_helpers::count_match_node_transactions(&pool, transaction_id1 as i64).await?;

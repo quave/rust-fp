@@ -10,7 +10,7 @@ use processing::{
 };
 
 use ecom::{
-    ecom_db_model::Order,
+    models::Order,
     ecom_order_storage::EcomOrderStorage,
     expression_based_scorer::get_expression_based_scorer,
 };

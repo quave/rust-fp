@@ -23,6 +23,7 @@ sqlx = { workspace = true, features = [
     "uuid",
     "json"
 ]}
+sea-orm = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
@@ -59,3 +60,4 @@ path = "src/bin/processor.rs"
 [[bin]]
 name = "backend"
 path = "src/bin/backend.rs"
+

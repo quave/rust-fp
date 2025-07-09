@@ -102,6 +102,43 @@ frida-ai/
 - Use workspace structure for component separation
 - Maintain clear separation between core processing and domain-specific implementations
 
+### CRITICAL: Architectural Dependency Rules
+
+**NEVER VIOLATE THESE DEPENDENCY CONSTRAINTS:**
+
+1. **Processing Module Constraints**:
+   - `processing/` MUST remain model-agnostic and NEVER import domain-specific modules
+   - `processing/` CANNOT import `ecom`, `retail`, or any other domain modules
+   - `processing/` defines traits but never implements domain-specific logic
+   - Domain-specific entities and models MUST NOT live in `processing/`
+
+2. **Domain Module Constraints**:
+   - Domain modules (`ecom/`, `retail/`, etc.) implement processing traits
+   - Domain modules contain their own entities, storage implementations, and business logic
+   - Domain modules can depend on `processing` but `processing` NEVER depends on domain modules
+   - Each domain module is self-contained and can choose its own database technology
+
+3. **Circular Dependency Prevention**:
+   - If you need to avoid circular dependencies, move shared code to `common/`
+   - Create trait definitions in `processing/` and implementations in domain modules
+   - Use dependency injection patterns where domain modules provide implementations
+
+4. **Entity Ownership Rules**:
+   - Domain-specific entities (orders, customers, billing, etc.) → belong in their respective domain modules (`ecom/`, `retail/`, etc.)
+   - Core entities (transactions, features, labels) → belong in `processing/`
+   - Domain-specific storage implementations → belong in their respective domain modules
+
+5. **Database Technology Choices**:
+   - Each domain module can independently choose its database technology and ORM
+   - `processing/` defines storage traits that any technology can implement
+   - Database technology is an implementation detail, not an architectural constraint
+
+**RED FLAGS - Stop Immediately If You See:**
+- `use ecom::` (or any domain module) anywhere in `processing/src/`
+- Domain-specific entities in `processing/src/storage/` or `processing/src/`
+- Circular dependency errors between `processing` and domain modules
+- Domain-specific logic in `processing/` traits or implementations
+
 ### Implementation Guidelines
 - Implement async processing using Tokio
 - Leverage SQLx for type-safe database access
@@ -139,3 +176,5 @@ To extend Frida-AI with a new transaction type:
 6. Create configuration files for the new implementation
 7. Build executables that use the new model type with the core processing engine
 8. Update the web interface to display the new transaction type if needed
+
+

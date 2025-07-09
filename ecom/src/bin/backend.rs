@@ -5,7 +5,7 @@ use processing::executable_utils::{initialize_executable, run_backend};
 use processing::storage::{CommonStorage, ProdCommonStorage};
 
 use ecom::{
-    ecom_db_model::Order, ecom_order_storage::EcomOrderStorage
+    models::Order, ecom_order_storage::EcomOrderStorage
 };
 
 #[tokio::main]
