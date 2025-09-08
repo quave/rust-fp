@@ -5,10 +5,7 @@ use chrono::Utc;
 use async_trait::async_trait;
 
 use processing::{
-    model::{
-        Feature, FeatureValue, ModelId, Processible, MatchingField, ScorerResult, ConnectedTransaction, DirectConnection, 
-        TriggeredRule, Channel, ScoringEvent, Label, FraudLevel, LabelSource
-    },
+    model::*,
     queue::QueueService,
     storage::{ProcessibleStorage, CommonStorage},
 };
@@ -166,10 +163,6 @@ impl Processible for TestTransaction {
         features
     }
 
-    fn tx_id(&self) -> ModelId {
-        self.transaction_id
-    }
-
     fn id(&self) -> ModelId {
         self.id
     }
@@ -213,6 +206,9 @@ impl MockCommonStorage {
 
 #[async_trait]
 impl CommonStorage for MockCommonStorage {
+    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { Ok(1) }
+    async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { Ok(()) }
+
     async fn save_features(
         &self,
         _transaction_id: i64,
@@ -269,14 +265,14 @@ impl CommonStorage for MockCommonStorage {
     async fn get_channels(
         &self,
         _model_id: ModelId,
-    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>> {
         Ok(Vec::new())
     }
 
     async fn get_scoring_events(
         &self,
         _transaction_id: ModelId,
-    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>> {
         Ok(Vec::new())
     }
 
@@ -287,26 +283,7 @@ impl CommonStorage for MockCommonStorage {
         Ok(Vec::new())
     }
 
-    async fn save_label(
-        &self,
-        _label: &Label,
-    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        Ok(1)
-    }
-
-    async fn get_label(
-        &self,
-        _label_id: ModelId,
-    ) -> Result<Label, Box<dyn Error + Send + Sync>> {
-        Ok(Label {
-            id: 1,
-            fraud_level: FraudLevel::NoFraud,
-            fraud_category: "Test".to_string(),
-            label_source: LabelSource::Manual,
-            labeled_by: "test".to_string(),
-            created_at: Utc::now(),
-        })
-    }
+    // removed save_label/get_label from trait
 
     async fn update_transaction_label(
         &self,
@@ -314,6 +291,14 @@ impl CommonStorage for MockCommonStorage {
         _label_id: ModelId,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
+    }
+
+    async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
+        Ok(LabelingResult {
+            label_id: 1,
+            success_count: 0,
+            failed_transaction_ids: vec![],
+        })
     }
 }
 
@@ -341,6 +326,9 @@ impl ConnectionTrackingStorage {
 
 #[async_trait]
 impl CommonStorage for ConnectionTrackingStorage {
+    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { Ok(1) }
+    async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { Ok(()) }
+
     async fn save_features(
         &self,
         _transaction_id: i64,
@@ -410,14 +398,14 @@ impl CommonStorage for ConnectionTrackingStorage {
     async fn get_channels(
         &self,
         _model_id: ModelId,
-    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>> {
         Ok(Vec::new())
     }
 
     async fn get_scoring_events(
         &self,
         _transaction_id: ModelId,
-    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>> {
         Ok(Vec::new())
     }
 
@@ -428,26 +416,7 @@ impl CommonStorage for ConnectionTrackingStorage {
         Ok(Vec::new())
     }
 
-    async fn save_label(
-        &self,
-        _label: &Label,
-    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        Ok(1)
-    }
-
-    async fn get_label(
-        &self,
-        _label_id: ModelId,
-    ) -> Result<Label, Box<dyn Error + Send + Sync>> {
-        Ok(Label {
-            id: 1,
-            fraud_level: FraudLevel::NoFraud,
-            fraud_category: "Test".to_string(),
-            label_source: LabelSource::Manual,
-            labeled_by: "test".to_string(),
-            created_at: Utc::now(),
-        })
-    }
+    // removed save_label/get_label from trait
 
     async fn update_transaction_label(
         &self,
@@ -455,6 +424,14 @@ impl CommonStorage for ConnectionTrackingStorage {
         _label_id: ModelId,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
+    }
+
+    async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
+        Ok(LabelingResult {
+            label_id: 1,
+            success_count: 0,
+            failed_transaction_ids: vec![],
+        })
     }
 }
 
@@ -480,6 +457,14 @@ impl ProcessibleStorage<TestTransaction> for MockProcessibleStorage {
             Some(tx) => Ok(tx.clone()),
             None => Err("Transaction not found".into()),
         }
+    }
+
+    async fn set_transaction_id(
+        &self,
+        _processible_id: ModelId,
+        _transaction_id: ModelId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Ok(())
     }
 }
 

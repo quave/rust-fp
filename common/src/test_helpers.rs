@@ -520,8 +520,8 @@ mod sqlx_helpers {
     /// Truncate processing tables in dependency order
     pub async fn truncate_processing_tables(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
         let tables = &[
-            "order_items", "customers", "billing_data", "orders",
-            "match_node_transactions", "match_node", "transactions", "features",
+            "order_items", "customers", "billing_data", "transactions", "orders",
+            "match_node_transactions", "match_node", "features",
             "channels", "scoring_events", "triggered_rules", "labels"
         ];
         truncate_tables(pool, tables).await
@@ -573,7 +573,7 @@ mod sqlx_helpers {
     /// Create a transaction with unique test ID
     pub async fn create_test_transaction(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
         let unique_id = generate_unique_test_id() as i64;
-        sqlx::query!("INSERT INTO transactions (id, created_at) VALUES ($1, NOW())", unique_id)
+        sqlx::query!("INSERT INTO transactions (id) VALUES ($1)", unique_id)
             .execute(pool).await?;
         Ok(unique_id)
     }
@@ -648,11 +648,11 @@ mod sqlx_helpers {
         
         // Delete in dependency order
         for query in &[
-            "DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)",
-            "DELETE FROM customers WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)",
-            "DELETE FROM billing_data WHERE order_id IN (SELECT id FROM orders WHERE transaction_id = $1)",
-            "DELETE FROM orders WHERE transaction_id = $1",
-            "DELETE FROM transactions WHERE id = $1"
+            "DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE id = $1)",
+            "DELETE FROM customers WHERE order_id IN (SELECT id FROM orders WHERE id = $1)",
+            "DELETE FROM billing_data WHERE order_id IN (SELECT id FROM orders WHERE id = $1)",
+            "DELETE FROM transactions WHERE id = $1",
+            "DELETE FROM orders WHERE id = $1"
         ] {
             sqlx::query(query).bind(transaction_id).execute(&mut *tx).await?;
         }

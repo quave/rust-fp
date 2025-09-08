@@ -4,4 +4,3 @@ pub mod score_tests;
 pub mod matching_tests;
 pub mod connection_tests;
 pub mod label_tests;
-pub mod labeling_tests; 

@@ -1,6 +1,7 @@
 use chrono::Utc;
+use chrono::TimeZone;
 use processing::{
-    model::{Label, FraudLevel, LabelSource},
+    model::{FraudLevel, LabelSource},
     storage::CommonStorage,
 };
 use std::error::Error;
@@ -18,33 +19,46 @@ async fn test_save_and_get_label() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (_pool, storage) = get_test_storage().await?;
     
     // Create test label
-    let test_label = Label {
+    let test_label = entities::label::Model {
         id: 0, // Will be assigned by database
         fraud_level: FraudLevel::Fraud,
         fraud_category: "Test Fraud".to_string(),
         label_source: LabelSource::Manual,
         labeled_by: "test_user".to_string(),
-        created_at: Utc::now(),
+        created_at: Utc::now().naive_utc(),
     };
     
-    // Save label
-    let label_id = storage.save_label(&test_label).await?;
+    // Save label via SeaORM directly (trait no longer exposes save_label)
+    use processing::storage::sea_orm_storage_model as entities;
+    use sea_orm::{ActiveModelTrait, Set};
+    let db = &storage.db;
+    let label_am = entities::label::ActiveModel {
+        id: sea_orm::NotSet,
+        fraud_level: Set(test_label.fraud_level),
+        fraud_category: Set(test_label.fraud_category.clone()),
+        label_source: Set(test_label.label_source),
+        labeled_by: Set(test_label.labeled_by.clone()),
+        created_at: Set(test_label.created_at),
+    };
+    let label_model = label_am.insert(db).await?;
+    let label_id = label_model.id;
     
     // Verify label_id is non-zero
     assert!(label_id > 0, "Expected non-zero label ID");
     
-    // Retrieve label
-    let retrieved_label = storage.get_label(label_id).await?;
+    // Retrieve label via SeaORM directly
+    use sea_orm::EntityTrait;
+    let retrieved_label = entities::label::Entity::find_by_id(label_id).one(db).await?.unwrap();
     
     // Verify label fields
     assert_eq!(retrieved_label.id, label_id);
-    assert!(matches!(retrieved_label.fraud_level, FraudLevel::Fraud));
+    assert_eq!(retrieved_label.fraud_level, FraudLevel::Fraud);
     assert_eq!(retrieved_label.fraud_category, "Test Fraud");
-    assert!(matches!(retrieved_label.label_source, LabelSource::Manual));
+    assert_eq!(retrieved_label.label_source, LabelSource::Manual);
     assert_eq!(retrieved_label.labeled_by, "test_user");
     
     // Created_at should be within a small time window of the original
-    let time_diff = (retrieved_label.created_at - test_label.created_at).num_seconds().abs();
+    let time_diff = (Utc.from_utc_datetime(&retrieved_label.created_at) - Utc.from_utc_datetime(&test_label.created_at)).num_seconds().unsigned_abs() as i64;
     assert!(time_diff < 10, "Created_at timestamp differs by more than 10 seconds");
     
     Ok(())
@@ -69,28 +83,36 @@ async fn test_save_label_with_different_fraud_levels() -> Result<(), Box<dyn Err
         // Clone the fraud_level for use in multiple places
         let fraud_level_clone = fraud_level.clone();
         
-        let test_label = Label {
+        let test_label = entities::label::Model {
             id: 0,
             fraud_level,
             fraud_category: format!("Test {:?}", fraud_level_clone),
             label_source: LabelSource::Manual,
             labeled_by: "test_user".to_string(),
-            created_at: Utc::now(),
+            created_at: Utc::now().naive_utc(),
         };
         
         // Save label
-        let label_id = storage.save_label(&test_label).await?;
+        use processing::storage::sea_orm_storage_model as entities;
+        use sea_orm::{ActiveModelTrait, Set};
+        let db = &storage.db;
+        let am = entities::label::ActiveModel {
+            id: sea_orm::NotSet,
+            fraud_level: Set(test_label.fraud_level),
+            fraud_category: Set(test_label.fraud_category.clone()),
+            label_source: Set(test_label.label_source),
+            labeled_by: Set(test_label.labeled_by.clone()),
+            created_at: Set(test_label.created_at),
+        };
+        let model = am.insert(db).await?;
+        let label_id = model.id;
         
-        // Retrieve label
-        let retrieved_label = storage.get_label(label_id).await?;
+        // Retrieve label via SeaORM
+        use sea_orm::EntityTrait;
+        let retrieved_label = entities::label::Entity::find_by_id(label_id).one(db).await?.unwrap();
         
         // Verify fraud level is stored correctly
-        assert!(
-            std::mem::discriminant(&retrieved_label.fraud_level) == std::mem::discriminant(&test_label.fraud_level),
-            "Fraud level not stored correctly: expected {:?}, got {:?}", 
-            test_label.fraud_level, 
-            retrieved_label.fraud_level
-        );
+        assert_eq!(retrieved_label.fraud_level, test_label.fraud_level);
     }
     
     Ok(())
@@ -109,28 +131,36 @@ async fn test_save_label_with_different_sources() -> Result<(), Box<dyn Error + 
     ];
     
     for label_source in label_sources {
-        let test_label = Label {
+        let test_label = entities::label::Model {
             id: 0,
             fraud_level: FraudLevel::Fraud,
             fraud_category: "Test Category".to_string(),
             label_source,
             labeled_by: "test_user".to_string(),
-            created_at: Utc::now(),
+            created_at: Utc::now().naive_utc(),
         };
         
-        // Save label
-        let label_id = storage.save_label(&test_label).await?;
+        // Save label via SeaORM
+        use processing::storage::sea_orm_storage_model as entities;
+        use sea_orm::{ActiveModelTrait, Set};
+        let db = &storage.db;
+        let am = entities::label::ActiveModel {
+            id: sea_orm::NotSet,
+            fraud_level: Set(test_label.fraud_level),
+            fraud_category: Set(test_label.fraud_category.clone()),
+            label_source: Set(test_label.label_source),
+            labeled_by: Set(test_label.labeled_by.clone()),
+            created_at: Set(test_label.created_at),
+        };
+        let model = am.insert(db).await?;
+        let label_id = model.id;
         
-        // Retrieve label
-        let retrieved_label = storage.get_label(label_id).await?;
+        // Retrieve label via SeaORM
+        use sea_orm::EntityTrait;
+        let retrieved_label = entities::label::Entity::find_by_id(label_id).one(db).await?.unwrap();
         
         // Verify label source is stored correctly
-        assert!(
-            std::mem::discriminant(&retrieved_label.label_source) == std::mem::discriminant(&test_label.label_source),
-            "Label source not stored correctly: expected {:?}, got {:?}", 
-            test_label.label_source, 
-            retrieved_label.label_source
-        );
+        assert_eq!(retrieved_label.label_source, test_label.label_source);
     }
     
     Ok(())
@@ -156,17 +186,29 @@ async fn test_update_transaction_label() -> Result<(), Box<dyn Error + Send + Sy
     .await?;
     
     // Create test label
-    let test_label = Label {
+    let test_label = entities::label::Model {
         id: 0,
         fraud_level: FraudLevel::Fraud,
         fraud_category: "Test Fraud".to_string(),
         label_source: LabelSource::Manual,
         labeled_by: "test_user".to_string(),
-        created_at: Utc::now(),
+        created_at: Utc::now().naive_utc(),
     };
     
-    // Save label
-    let label_id = storage.save_label(&test_label).await?;
+    // Save label via SeaORM
+    use processing::storage::sea_orm_storage_model as entities;
+    use sea_orm::{ActiveModelTrait, Set};
+    let db = &storage.db;
+    let am = entities::label::ActiveModel {
+        id: sea_orm::NotSet,
+        fraud_level: Set(test_label.fraud_level),
+        fraud_category: Set(test_label.fraud_category.clone()),
+        label_source: Set(test_label.label_source),
+        labeled_by: Set(test_label.labeled_by.clone()),
+        created_at: Set(test_label.created_at),
+    };
+    let model = am.insert(db).await?;
+    let label_id = model.id;
     
     // Update transaction label
     storage.update_transaction_label(transaction_id, label_id).await?;
@@ -194,17 +236,29 @@ async fn test_update_nonexistent_transaction_label() -> Result<(), Box<dyn Error
     let (_pool, storage) = get_test_storage().await?;
     
     // Create test label
-    let test_label = Label {
+    let test_label = entities::label::Model {
         id: 0,
         fraud_level: FraudLevel::Fraud,
         fraud_category: "Test Fraud".to_string(),
         label_source: LabelSource::Manual,
         labeled_by: "test_user".to_string(),
-        created_at: Utc::now(),
+        created_at: Utc::now().naive_utc(),
     };
     
-    // Save label
-    let label_id = storage.save_label(&test_label).await?;
+    // Save label via SeaORM
+    use processing::storage::sea_orm_storage_model as entities;
+    use sea_orm::{ActiveModelTrait, Set};
+    let db = &storage.db;
+    let am = entities::label::ActiveModel {
+        id: sea_orm::NotSet,
+        fraud_level: Set(test_label.fraud_level),
+        fraud_category: Set(test_label.fraud_category.clone()),
+        label_source: Set(test_label.label_source),
+        labeled_by: Set(test_label.labeled_by.clone()),
+        created_at: Set(test_label.created_at),
+    };
+    let model = am.insert(db).await?;
+    let label_id = model.id;
     
     // Try to update non-existent transaction - this might actually succeed if the implementation
     // doesn't verify transaction existence
@@ -249,17 +303,29 @@ async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Er
     .await?;
     
     // Create first label
-    let first_label = Label {
+    let first_label = entities::label::Model {
         id: 0,
         fraud_level: FraudLevel::Fraud,
         fraud_category: "First Label".to_string(),
         label_source: LabelSource::Manual,
         labeled_by: "test_user".to_string(),
-        created_at: Utc::now(),
+        created_at: Utc::now().naive_utc(),
     };
     
     // Save first label
-    let first_label_id = storage.save_label(&first_label).await?;
+    use processing::storage::sea_orm_storage_model as entities;
+    use sea_orm::{ActiveModelTrait, Set};
+    let db = &storage.db;
+    let am1 = entities::label::ActiveModel {
+        id: sea_orm::NotSet,
+        fraud_level: Set(first_label.fraud_level),
+        fraud_category: Set(first_label.fraud_category.clone()),
+        label_source: Set(first_label.label_source),
+        labeled_by: Set(first_label.labeled_by.clone()),
+        created_at: Set(first_label.created_at),
+    };
+    let model1 = am1.insert(db).await?;
+    let first_label_id = model1.id;
     
     // Update transaction with first label
     storage.update_transaction_label(transaction_id, first_label_id).await?;
@@ -278,17 +344,26 @@ async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Er
     assert_eq!(row1.label_id, Some(first_label_id));
     
     // Create second label
-    let second_label = Label {
+    let second_label = entities::label::Model {
         id: 0,
         fraud_level: FraudLevel::NoFraud,
         fraud_category: "Second Label".to_string(),
         label_source: LabelSource::Api,
         labeled_by: "api".to_string(),
-        created_at: Utc::now(),
+        created_at: Utc::now().naive_utc(),
     };
     
     // Save second label
-    let second_label_id = storage.save_label(&second_label).await?;
+    let am2 = entities::label::ActiveModel {
+        id: sea_orm::NotSet,
+        fraud_level: Set(second_label.fraud_level),
+        fraud_category: Set(second_label.fraud_category.clone()),
+        label_source: Set(second_label.label_source),
+        labeled_by: Set(second_label.labeled_by.clone()),
+        created_at: Set(second_label.created_at),
+    };
+    let model2 = am2.insert(db).await?;
+    let second_label_id = model2.id;
     
     // Update transaction with second label
     storage.update_transaction_label(transaction_id, second_label_id).await?;
@@ -308,21 +383,3 @@ async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Er
     
     Ok(())
 }
-
-// =============================================================================
-// BUSINESS LOGIC TESTS (Unit tests with unified mocks)
-// =============================================================================
-
-// TODO: Re-implement these tests with centralized MockCommonStorage from common crate
-// 
-// This section previously contained comprehensive business logic unit tests for 
-// transaction labeling functionality including:
-// - test_label_transactions_complete_success
-// - test_label_transactions_save_label_failure  
-// - test_label_transactions_partial_success
-// - test_label_transactions_complete_failure
-// - test_label_transactions_empty_list
-//
-// These tests have been temporarily commented out during the test helper 
-// centralization effort. When re-implementing, they should use the centralized
-// MockCommonStorage from the common crate's test_helpers module. 

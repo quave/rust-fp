@@ -1,12 +1,10 @@
+use async_graphql::http::GraphiQLSource;
 use clap::Parser;
 use std::{error::Error, fmt::Debug, sync::Arc};
 use axum::{
-    routing::{post, get},
-    Router,
-    extract::Json,
-    response::IntoResponse,
-    http::StatusCode,
+    extract::Json, http::StatusCode, response::{self, IntoResponse}, routing::{get, post}, Router
 };
+use async_graphql_axum::GraphQL;
 use tower_http::{
     trace::TraceLayer,
     cors::{CorsLayer, Any},
@@ -15,11 +13,10 @@ use http::header;
 use common::config::{Config, ImporterConfig, BackendConfig};
 use crate::{
     importer::Importer,
-    model::{FraudLevel, Importable, ImportableSerde, ModelId, ModelRegistryProvider, WebTransaction},
+    model::{FraudLevel, Importable, ImportableSerde, ModelId, WebTransaction},
     queue::QueueService,
-    storage::{CommonStorage, ImportableStorage, WebStorage}, ui_model::FilterRequest,
+    storage::{CommonStorage, ImportableStorage, WebStorage},
 };
-use serde_json::to_string_pretty;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -123,22 +120,28 @@ pub async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK").into_response()
 }
 
+async fn graphiql() -> impl IntoResponse {
+    response::Html(GraphiQLSource::build().endpoint("/api/transactions/graphql").finish())
+}
+
 pub async fn run_backend<T>(
     config: BackendConfig,
     storage: Arc<dyn WebStorage<T>>,
     common_storage: Arc<dyn CommonStorage>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-    T: WebTransaction + ModelRegistryProvider + Send + Sync + Clone + 'static,
+    T: WebTransaction + Send + Sync + Clone + 'static,
 {
     let state = AppState {
         web_storage: storage,
         common_storage,
     };
+
+    let schema = state.web_storage.get_seaography_schema();
     
     let app = Router::new()
-        .route("/api/transactions", get(list_transactions::<T>))
-        .route("/api/transactions/filter", post(filter_transactions::<T>))
+        .route("/api/transactions/graphql", get(graphiql).post_service(GraphQL::new(schema)))
+        
         .route("/api/transactions/label", post(label_transaction::<T>))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
@@ -159,12 +162,12 @@ where
 
 // Move AppState outside the function so it's visible to handler functions
 #[derive(Clone)]
-pub struct AppState<T: WebTransaction + ModelRegistryProvider + Send + Sync + 'static> {
+pub struct AppState<T: WebTransaction + Send + Sync + 'static> {
     web_storage: Arc<dyn WebStorage<T>>,
     common_storage: Arc<dyn CommonStorage>,
 }
 
-impl<T: WebTransaction + ModelRegistryProvider + Send + Sync + 'static> AppState<T> {
+impl<T: WebTransaction + Send + Sync + 'static> AppState<T> {
     pub fn new(
         web_storage: Arc<dyn WebStorage<T>>,
         common_storage: Arc<dyn CommonStorage>,
@@ -172,29 +175,6 @@ impl<T: WebTransaction + ModelRegistryProvider + Send + Sync + 'static> AppState
         Self {
             web_storage,
             common_storage,
-        }
-    }
-}
-
-pub async fn list_transactions<T: ModelRegistryProvider>(
-    axum::extract::State(state): axum::extract::State<AppState<T>>,
-) -> impl IntoResponse
-where
-    T: WebTransaction + Send + Sync,
-{
-    match state.web_storage.get_transactions(FilterRequest::default()).await {
-        Ok(transactions) => {
-            tracing::info!("Loaded list of {} transactions", transactions.len());
-            (StatusCode::OK, Json(transactions)).into_response()
-        }
-        Err(e) => {
-            // Enhanced error logging for list transactions
-            tracing::error!(
-                error = %e,
-                endpoint = "list_transactions",
-                "Failed to load transactions"
-            );
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
 }
@@ -208,12 +188,10 @@ pub struct LabelRequest {
     pub labeled_by: String,
 }
 
-pub async fn label_transaction<T: ModelRegistryProvider>(
+pub async fn label_transaction<T: WebTransaction + Send + Sync>(
     axum::extract::State(state): axum::extract::State<AppState<T>>,
     Json(label_request): Json<LabelRequest>,
 ) -> impl IntoResponse 
-where
-    T: WebTransaction + Send + Sync,
 {
     // Log the incoming request
     tracing::info!(
@@ -265,53 +243,6 @@ where
                 "Failed to execute labeling operation"
             );
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-        }
-    }
-}
-
-pub async fn filter_transactions<T: ModelRegistryProvider>(
-    axum::extract::State(state): axum::extract::State<AppState<T>>,
-    Json(filter_request): Json<FilterRequest>,
-) -> impl IntoResponse
-where
-    T: WebTransaction + Send + Sync,
-{
-    // Log the incoming filter request with details
-    let filter_json = match to_string_pretty(&filter_request) {
-        Ok(json) => json,
-        Err(_) => format!("{:?}", filter_request),
-    };
-    
-    tracing::info!(
-        method = "filter_transactions",
-        filter_request = %filter_json,
-        "Processing filter request"
-    );
-    
-    match state.web_storage.get_transactions(filter_request).await {
-        Ok(transactions) => {
-            tracing::info!("Successfully filtered transactions, returning {} results", transactions.len());
-            (StatusCode::OK, Json(transactions)).into_response()
-        }
-        Err(e) => {
-            // Enhanced detailed error logging for filter failures
-            let error_message = e.to_string();
-            tracing::error!(
-                error = %error_message,
-                filter_request = %filter_json,
-                "Failed to filter transactions"
-            );
-            
-            // Parse the error message to provide more context if possible
-            if error_message.contains("Error processing condition column") || 
-               error_message.contains("Relation") || 
-               error_message.contains("not found on model") {
-                tracing::error!(
-                    "This appears to be a relation mapping error. Please check field names and model relations."
-                );
-            }
-            
-            (StatusCode::INTERNAL_SERVER_ERROR, error_message).into_response()
         }
     }
 }

@@ -1,5 +1,5 @@
-use ecom::ecom_import_model::{ImportOrder, ImportOrderItem, ImportCustomerData, ImportBillingData};
-use ecom::models::Order;
+use ecom::import_model::{ImportOrder, ImportOrderItem, ImportCustomerData, ImportBillingData};
+use ecom::processible::EcomOrder;
 use processing::storage::{ImportableStorage, WebStorage};
 use std::error::Error;
 use common::test_helpers::{generate_unique_id, get_test_database_url};
@@ -37,15 +37,15 @@ fn create_test_import_order(unique_prefix: &str) -> ImportOrder {
 #[tokio::test]
 async fn test_save_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Create storage instance
-    let storage = ecom::ecom_order_storage::EcomOrderStorage::new(&get_test_database_url()).await?;
+    let storage = ecom::order_storage::OrderStorage::new(&get_test_database_url()).await?;
     
     // Generate unique test identifier
     let test_id = generate_unique_id("SAVE-TX");
     let test_order = create_test_import_order(&test_id);
     
     // Save transaction and verify
-    let transaction_id = storage.save_transaction(&test_order).await?;
-    assert!(transaction_id > 0, "Transaction ID should be positive");
+    let model_id = storage.save(&test_order).await?;
+    assert!(model_id > 0, "Transaction ID should be positive");
     
     Ok(())
 }
@@ -53,15 +53,15 @@ async fn test_save_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
 #[tokio::test]
 async fn test_get_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Create storage instance
-    let storage = ecom::ecom_order_storage::EcomOrderStorage::new(&get_test_database_url()).await?;
+    let storage = ecom::order_storage::OrderStorage::new(&get_test_database_url()).await?;
     
     // Generate unique test identifier and create order
     let test_id = generate_unique_id("GET-TX");
     let test_order = create_test_import_order(&test_id);
     
     // Save and retrieve transaction
-    let transaction_id = storage.save_transaction(&test_order).await?;
-    let retrieved: Order = storage.get_transaction(transaction_id).await?;
+    let model_id = storage.save(&test_order).await?;
+    let retrieved: EcomOrder = storage.get_web_transaction(model_id).await?;
     
     // Verify retrieved data matches original
     assert_eq!(retrieved.order.order_number, test_order.order_number);
@@ -74,17 +74,16 @@ async fn test_get_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
 #[tokio::test]
 async fn test_save_and_retrieve_order() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Create storage instance
-    let storage = ecom::ecom_order_storage::EcomOrderStorage::new(&get_test_database_url()).await?;
+    let storage = ecom::order_storage::OrderStorage::new(&get_test_database_url()).await?;
     
     // Generate unique test identifier
     let test_id = generate_unique_id("SAVE-RETRIEVE");
     let test_order = create_test_import_order(&test_id);
-    
-    // Save transaction
-    let transaction_id = storage.save_transaction(&test_order).await?;
-    
+        
+    let model_id = storage.save(&test_order).await?;
+
     // Retrieve and verify all components
-    let retrieved: Order = storage.get_transaction(transaction_id).await?;
+    let retrieved: EcomOrder = storage.get_web_transaction(model_id).await?;
     
     // Verify order details
     assert_eq!(retrieved.order.order_number, test_order.order_number);
@@ -111,3 +110,24 @@ async fn test_save_and_retrieve_order() -> Result<(), Box<dyn Error + Send + Syn
     
     Ok(())
 } 
+
+#[tokio::test]
+async fn test_multiple_orders() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let storage = ecom::order_storage::OrderStorage::new(&get_test_database_url()).await?;
+
+    let mut ids = Vec::new();
+    for i in 1..=3 {
+        let test_id = generate_unique_id(&format!("MULTI-{:03}", i));
+        let test_order = create_test_import_order(&test_id);
+        let id = storage.save(&test_order).await?;
+        ids.push((id, test_order));
+    }
+
+    for (id, expected) in ids {
+        let retrieved: EcomOrder = storage.get_web_transaction(id).await?;
+        assert_eq!(retrieved.order.order_number, expected.order_number);
+        assert!(retrieved.customer.name.contains("John Doe"));
+    }
+
+    Ok(())
+}

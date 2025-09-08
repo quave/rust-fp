@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     last_scoring_date TIMESTAMP,
     processing_complete BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (label_id) REFERENCES labels(id)
+    FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
 CREATE INDEX IF NOT EXISTS idx_transactions_label_id ON transactions(label_id);
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS channels (
     name TEXT NOT NULL,
     model_id BIGINT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (model_id) REFERENCES models(id)
+    FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_channels_created_at ON channels(created_at);
 CREATE INDEX IF NOT EXISTS idx_channels_model_id ON channels(model_id);
@@ -69,8 +69,8 @@ create table if not exists scoring_events (
     channel_id BIGINT NOT NULL,
     total_score INTEGER NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id),
-    FOREIGN KEY (channel_id) REFERENCES channels(id)
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_scoring_events_transaction_id ON scoring_events(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_scoring_events_channel_id ON scoring_events(channel_id);
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS scoring_rules (
     rule JSONB NOT NULL,
     score INTEGER NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (model_id) REFERENCES models(id)
+    FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_scoring_rules_model_id ON scoring_rules(model_id);
 CREATE INDEX IF NOT EXISTS idx_scoring_rules_name ON scoring_rules(name);
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS triggered_rules (
     id BIGSERIAL PRIMARY KEY,
     scoring_events_id BIGINT NOT NULL,
     rule_id BIGINT NOT NULL,
-    FOREIGN KEY (scoring_events_id) REFERENCES scoring_events(id),
+    FOREIGN KEY (scoring_events_id) REFERENCES scoring_events(id) ON DELETE CASCADE,
     FOREIGN KEY (rule_id) REFERENCES scoring_rules(id)
 );
 CREATE INDEX IF NOT EXISTS idx_triggered_rules_scoring_events_id ON triggered_rules(scoring_events_id);
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS features (
     simple_features JSONB,
     graph_features JSONB NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_features_transaction_id_version ON features(transaction_id, transaction_version);
 CREATE INDEX IF NOT EXISTS idx_features_transaction_id ON features(transaction_id);

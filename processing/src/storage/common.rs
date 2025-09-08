@@ -1,13 +1,18 @@
-use crate::model::{
-    Channel, ConnectedTransaction, DirectConnection, Feature, FraudLevel, Label, LabelingResult, LabelSource, MatchingField, ModelId, ScoringEvent,
-    TriggeredRule,
-};
+use crate::model::*;
 use async_trait::async_trait;
 use std::error::Error;
-use chrono::Utc;
 
 #[async_trait]
 pub trait CommonStorage: Send + Sync {
+    async fn save_transaction(
+        &self,
+    ) -> Result<ModelId, Box<dyn Error + Send + Sync>>;
+
+    async fn mark_transaction_processed(
+        &self,
+        transaction_id: ModelId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
+
     async fn save_features(
         &self,
         transaction_id: ModelId,
@@ -52,27 +57,17 @@ pub trait CommonStorage: Send + Sync {
     async fn get_channels(
         &self,
         model_id: ModelId,
-    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>>;
+    ) -> Result<Vec<crate::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>>;
     
     async fn get_scoring_events(
         &self,
         transaction_id: ModelId,
-    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>>;
+    ) -> Result<Vec<crate::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>>;
     
     async fn get_triggered_rules(
         &self,
         scoring_event_id: ModelId,
     ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>>;
-    
-    async fn save_label(
-        &self,
-        label: &Label,
-    ) -> Result<ModelId, Box<dyn Error + Send + Sync>>;
-    
-    async fn get_label(
-        &self,
-        label_id: ModelId,
-    ) -> Result<Label, Box<dyn Error + Send + Sync>>;
     
     async fn update_transaction_label(
         &self,
@@ -87,46 +82,5 @@ pub trait CommonStorage: Send + Sync {
         fraud_level: FraudLevel,
         fraud_category: String,
         labeled_by: String,
-    ) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
-        // Create label object
-        let label = Label {
-            id: 0, // Will be filled by the database
-            fraud_level,
-            fraud_category,
-            label_source: LabelSource::Manual,
-            labeled_by,
-            created_at: Utc::now(),
-        };
-        
-        // Save the label and get its ID
-        let label_id = self.save_label(&label).await?;
-        
-        let mut success_count = 0;
-        let mut failed_transaction_ids = Vec::new();
-        
-        // Apply the label to each transaction ID in the batch
-        for &transaction_id in transaction_ids {
-            match self.update_transaction_label(transaction_id, label_id).await {
-                Ok(_) => {
-                    success_count += 1;
-                    tracing::info!("Successfully labeled transaction {}: label_id={}", transaction_id, label_id);
-                },
-                Err(e) => {
-                    tracing::error!(
-                        error = %e,
-                        transaction_id = %transaction_id,
-                        label_id = %label_id,
-                        "Failed to update transaction with label"
-                    );
-                    failed_transaction_ids.push(transaction_id);
-                }
-            }
-        }
-        
-        Ok(LabelingResult {
-            label_id,
-            success_count,
-            failed_transaction_ids,
-        })
-    }
+    ) -> Result<LabelingResult, Box<dyn Error + Send + Sync>>;
 } 

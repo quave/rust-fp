@@ -7,8 +7,8 @@ use processing::{
 };
 
 use ecom::{
-    ecom_import_model::ImportOrder,
-    ecom_order_storage::EcomOrderStorage,
+    import_model::ImportOrder,
+    order_storage::OrderStorage,
 };
 
 #[tokio::main]
@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = initialize_executable()?;
     
     // Create storage
-    let storage = Arc::new(EcomOrderStorage::new(&config.common.database_url).await?);
+    let storage = Arc::new(OrderStorage::new(&config.common.database_url).await?);
     
     // Create queue
     let queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);

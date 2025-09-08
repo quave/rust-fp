@@ -31,15 +31,15 @@ impl<I: Importable> Importer<I> {
         Ok(Box::new(model))
     }
 
-    pub async fn import(&self, transaction: I) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+    pub async fn import(&self, importable: I) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
         tracing::debug!("Starting import process for new transaction");
 
         let id = self
             .importable_storage
-            .save_transaction(&transaction)
+            .save(&importable)
             .await?;
         self.queue.enqueue(id).await?;
-        tracing::info!("Successfully queued transaction {:?} for processing", id);
+        tracing::info!("Successfully queued importable {:?} for processing", id);
 
         Ok(id)
     }

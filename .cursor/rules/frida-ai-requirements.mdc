@@ -133,11 +133,20 @@ frida-ai/
    - `processing/` defines storage traits that any technology can implement
    - Database technology is an implementation detail, not an architectural constraint
 
+6. **Data Dependency Rules (DB-level)**:
+   - The core schema (`processing`) MUST NOT reference domain tables via foreign keys.
+   - Domain schemas MAY reference core tables to enforce invariants in a single-model runtime (e.g., nullable `orders.transaction_id` → `processing.transactions(id)` with `UNIQUE(transaction_id)`), or use a domain-owned join table linking domain object and transaction.
+   - Never add an FK from `processing.transactions(model_id)` to any domain table.
+   - Run `processing` tests with ONLY core migrations; apply domain migrations only for domain binaries/tests.
+   - In single-model-per-binary deployments, enforce 1:1 linkage in the domain layer (FK or join table) while keeping the core unaware of domain structures.
+
 **RED FLAGS - Stop Immediately If You See:**
 - `use ecom::` (or any domain module) anywhere in `processing/src/`
 - Domain-specific entities in `processing/src/storage/` or `processing/src/`
 - Circular dependency errors between `processing` and domain modules
 - Domain-specific logic in `processing/` traits or implementations
+- FK from `processing.transactions(model_id)` to domain tables
+- Core tests that require domain migrations to pass
 
 ### Implementation Guidelines
 - Implement async processing using Tokio

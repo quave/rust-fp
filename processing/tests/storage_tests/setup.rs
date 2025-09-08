@@ -14,24 +14,6 @@ pub fn get_unique_model_id() -> ModelId {
     generate_unique_test_id() as ModelId
 }
 
-/// Create a transaction with a unique test ID to avoid conflicts
-pub async fn create_test_transaction(storage: &ProdCommonStorage) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-    let unique_id = get_unique_model_id();
-    
-    // Insert transaction with explicit ID to avoid auto-increment conflicts
-    sqlx::query!(
-        r#"
-        INSERT INTO transactions (id, created_at)
-        VALUES ($1, NOW())
-        "#,
-        unique_id
-    )
-    .execute(&storage.pool)
-    .await?;
-    
-    Ok(unique_id)
-}
-
 // Global async schema setup: runs only once per test process
 static SETUP: OnceCell<()> = OnceCell::const_new();
 
@@ -85,7 +67,8 @@ pub async fn save_raw_features(
     
     // For now, we'll still use the raw approach since we're testing raw feature insertion
     // In a production refactor, this would be replaced with proper Feature objects
-    let mut tx = storage.pool.begin().await?;
+    let pool = create_test_pool().await?;
+    let mut tx = pool.begin().await?;
 
     sqlx::query(
         r#"

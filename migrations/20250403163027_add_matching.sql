@@ -1,7 +1,6 @@
 DROP TABLE IF EXISTS match_node_transactions;
 DROP TABLE IF EXISTS match_node;
 
-
 CREATE TABLE IF NOT EXISTS match_node (
     id BIGSERIAL PRIMARY KEY,
     matcher TEXT NOT NULL,

@@ -4,10 +4,10 @@ use processing::{
     model::{ScorerResult, TriggeredRule},
     storage::CommonStorage,
 };
-use common::test_helpers::truncate_processing_tables;
+use common::test_helpers::{truncate_processing_tables, create_test_transaction};
 use serde_json::json;
 
-use super::setup::{get_test_storage, create_test_transaction};
+use super::setup::get_test_storage;
 
 #[tokio::test]
 #[serial_test::serial]
@@ -17,7 +17,7 @@ async fn test_save_scores() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Clean up any existing test data
     truncate_processing_tables(&pool).await?;
     
-    let transaction_id = create_test_transaction(&storage).await?;
+    let transaction_id = create_test_transaction(&pool).await?;
     
     // First create a model
     let model_id = common::test_helpers::create_test_model(&pool, "Test Model").await?;
@@ -83,7 +83,7 @@ async fn test_save_scores() -> Result<(), Box<dyn Error + Send + Sync>> {
 #[serial_test::serial]
 async fn test_save_scores_with_empty_list() -> Result<(), Box<dyn Error + Send + Sync>> {
     let (pool, storage) = get_test_storage().await?;
-    let transaction_id = create_test_transaction(&storage).await?;
+    let transaction_id = create_test_transaction(&pool).await?;
     
     // First create a model
     let model_id = common::test_helpers::create_test_model(&pool, "Test Model Empty").await?;
@@ -115,7 +115,7 @@ async fn test_save_scores_with_duplicate_names() -> Result<(), Box<dyn Error + S
     // Clean up any existing test data
     truncate_processing_tables(&pool).await?;
     
-    let transaction_id = create_test_transaction(&storage).await?;
+    let transaction_id = create_test_transaction(&pool).await?;
     
     // First create a model
     let model_id = common::test_helpers::create_test_model(&pool, "Test Model Duplicate").await?;

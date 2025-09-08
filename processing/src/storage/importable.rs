@@ -4,7 +4,7 @@ use std::error::Error;
 
 #[async_trait]
 pub trait ImportableStorage<I: Importable>: Send + Sync {
-    async fn save_transaction(
+    async fn save(
         &self,
         tx_data: &I,
     ) -> Result<ModelId, Box<dyn Error + Send + Sync>>;

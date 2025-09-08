@@ -2,14 +2,10 @@ use std::error::Error;
 use std::sync::Arc;
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
-use processing::model::{
-    Processible, Feature, FeatureValue, MatchingField, ModelId, ScorerResult, TriggeredRule,
-    ConnectedTransaction, DirectConnection, Channel, ScoringEvent, Label, FraudLevel, LabelSource, LabelingResult
-};
+use processing::model::*;
 use processing::storage::CommonStorage;
 use processing::queue::QueueService;
 use processing::storage::ProcessibleStorage;
-use chrono::Utc;
 
 
 use async_trait::async_trait;
@@ -30,10 +26,6 @@ impl ProcessibleAdapter {
 
 #[async_trait]
 impl Processible for ProcessibleAdapter {
-    fn tx_id(&self) -> i64 {
-        self.id
-    }
-
     fn id(&self) -> i64 {
         self.id
     }
@@ -90,6 +82,9 @@ impl MockCommonStorage {
 
 #[async_trait]
 impl CommonStorage for MockCommonStorage {
+    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { Ok(self.tx_id) }
+    async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { Ok(()) }
+
     async fn save_features(&self, tx_id: i64, _simple_features: Option<&[Feature]>, _graph_features: &[Feature]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         assert_eq!(tx_id, self.tx_id);
         Ok(())
@@ -118,32 +113,15 @@ impl CommonStorage for MockCommonStorage {
         Ok(())
     }
 
-    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<Channel>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
+    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn std::error::Error + Send + Sync>> { Ok(Vec::new()) }
 
-    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<ScoringEvent>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
+    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn std::error::Error + Send + Sync>> { Ok(Vec::new()) }
 
     async fn get_triggered_rules(&self, _scoring_event_id: ModelId) -> Result<Vec<TriggeredRule>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Vec::new())
     }
 
-    async fn save_label(&self, _label: &Label) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        Ok(1)
-    }
-
-    async fn get_label(&self, _label_id: ModelId) -> Result<Label, Box<dyn Error + Send + Sync>> {
-        Ok(Label {
-            id: 1,
-            fraud_level: FraudLevel::NoFraud,
-            fraud_category: "Test".to_string(),
-            label_source: LabelSource::Manual,
-            labeled_by: "test".to_string(),
-            created_at: Utc::now(),
-        })
-    }
+    // removed save_label/get_label from trait
 
     async fn update_transaction_label(&self, _transaction_id: ModelId, _label_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
@@ -165,6 +143,7 @@ mock! {
     #[async_trait]
     impl ProcessibleStorage<ProcessibleAdapter> for ProcessibleStorage {
         async fn get_processible(&self, transaction_id: i64) -> Result<ProcessibleAdapter, Box<dyn std::error::Error + Send + Sync>>;
+        async fn set_transaction_id(&self, processible_id: i64, transaction_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     }
 }
 
@@ -204,6 +183,9 @@ async fn test_processor_process() -> Result<(), Box<dyn Error + Send + Sync>> {
     processible_storage.expect_get_processible()
         .with(mockall::predicate::eq(tx_id))
         .returning(move |_| Ok(ProcessibleAdapter::new(tx_id)));
+    processible_storage.expect_set_transaction_id()
+        .with(mockall::predicate::eq(tx_id), mockall::predicate::eq(tx_id))
+        .returning(|_, _| Ok(()));
     
     // Create mockall-based queue services
     let mut queue = MockQueueService::new();
@@ -235,8 +217,6 @@ async fn test_processor_process() -> Result<(), Box<dyn Error + Send + Sync>> {
     
     // Verify result
     assert!(result.is_some());
-    let processed = result.unwrap();
-    assert_eq!(processed.tx_id(), tx_id);
     
     Ok(())
 }
@@ -307,6 +287,9 @@ async fn test_processor_with_custom_matching_config() -> Result<(), Box<dyn Erro
     processible_storage.expect_get_processible()
         .with(mockall::predicate::eq(tx_id))
         .returning(move |_| Ok(ProcessibleAdapter::new(tx_id)));
+    processible_storage.expect_set_transaction_id()
+        .with(mockall::predicate::eq(tx_id), mockall::predicate::eq(tx_id))
+        .returning(|_, _| Ok(()));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next()

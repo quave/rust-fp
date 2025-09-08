@@ -3,7 +3,7 @@ use std::error::Error;
 use tracing::debug;
 
 use super::setup::*;
-use common::test_helpers::truncate_processing_tables;
+use common::test_helpers::{create_test_transaction, truncate_processing_tables};
 use serial_test::serial;
 
 #[tokio::test]
@@ -225,9 +225,9 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     truncate_processing_tables(&pool).await?;
     
     // Create transactions
-    let tx1 = create_test_transaction(&storage).await?;
-    let tx2 = create_test_transaction(&storage).await?;
-    let tx3 = create_test_transaction(&storage).await?;
+    let tx1 = create_test_transaction(&pool).await?;
+    let tx2 = create_test_transaction(&pool).await?;
+    let tx3 = create_test_transaction(&pool).await?;
 
     // Setup matcher nodes
     let email_node_id = common::test_helpers::create_test_match_node(
@@ -276,7 +276,7 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     assert_eq!(connections[0].matcher, "email");
     
     // Get direct connections for an unconnected transaction
-    let tx4 = create_test_transaction(&storage).await?;
+    let tx4 = create_test_transaction(&pool).await?;
     let connections = storage.get_direct_connections(tx4).await?;
     assert_eq!(connections.len(), 0, "Unconnected transaction should have no connections");
     

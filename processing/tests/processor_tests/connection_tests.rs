@@ -76,8 +76,6 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
     
     // Verify the result
     assert!(result.is_some());
-    let processed_transaction = result.unwrap();
-    assert_eq!(processed_transaction.tx_id(), 1);
     
     // Verify that connections were fetched
     assert!(storage.fetch_connected_called.load(Ordering::Relaxed));
@@ -274,8 +272,6 @@ async fn test_processor_empty_connections() -> Result<(), Box<dyn Error + Send +
     
     // Verify the result
     assert!(result.is_some());
-    let processed_transaction = result.unwrap();
-    assert_eq!(processed_transaction.tx_id(), 1);
     
     // Verify that connections were still fetched (even if empty)
     assert!(storage.fetch_connected_called.load(Ordering::Relaxed));

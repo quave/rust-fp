@@ -38,7 +38,6 @@ async fn test_processor_with_high_value_transaction() -> Result<(), Box<dyn Erro
     // Verify the result
     assert!(result.is_some());
     let processed_transaction = result.unwrap();
-    assert_eq!(processed_transaction.tx_id(), 1);
     assert_eq!(processed_transaction.id(), 1);
     assert!(processed_transaction.is_high_value);
     
@@ -78,7 +77,6 @@ async fn test_processor_with_low_value_transaction() -> Result<(), Box<dyn Error
     // Verify the result
     assert!(result.is_some());
     let processed_transaction = result.unwrap();
-    assert_eq!(processed_transaction.tx_id(), 2);
     assert_eq!(processed_transaction.id(), 2);
     assert!(!processed_transaction.is_high_value);
     
@@ -198,8 +196,6 @@ async fn test_processor_scorer_integration() -> Result<(), Box<dyn Error + Send 
     
     // Verify the result includes scoring
     assert!(result.is_some());
-    let processed_transaction = result.unwrap();
-    assert_eq!(processed_transaction.tx_id(), 1);
     
     Ok(())
 }

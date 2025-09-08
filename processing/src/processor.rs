@@ -60,13 +60,16 @@ where
         }
     }
 
-    pub async fn process(&self, transaction_id: ModelId) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
-        info!("Processing transaction with ID: {:?}", &transaction_id);
+    pub async fn process(&self, processible_id: ModelId) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
+        info!("Processing model with ID: {:?}", &processible_id);
 
         let processible = self
             .processible_storage
-            .get_processible(transaction_id)
+            .get_processible(processible_id)
             .await?;
+
+        let transaction_id = self.common_storage.save_transaction().await?;
+        self.processible_storage.set_transaction_id(processible_id, transaction_id).await?;
 
         self.extract_and_save_matching_fields(&processible, transaction_id).await?;
         
@@ -74,7 +77,7 @@ where
         let connected_transactions = self.fetch_connected_transactions(transaction_id).await?;
         let direct_connections = self.fetch_direct_connections(transaction_id).await?;
         
-        debug!("Extracting features for transaction {:?}", &transaction_id);
+        debug!("Extracting features for processible {:?}, transaction {:?}", &processible_id, &transaction_id);
         let simple_features = processible.extract_simple_features();
         let graph_features = processible.extract_graph_features(
             &connected_transactions,
@@ -82,51 +85,53 @@ where
         );
 
         self.save_features(
-            processible.tx_id(), 
+            transaction_id, 
             Some(&simple_features), 
             &graph_features
         ).await?;
 
         let features = [simple_features, graph_features].concat();
         
-        self.score_and_save_results(&processible, transaction_id, features).await?;
+        self.score_and_save_results( processible_id, features).await?;
+
+        self.common_storage.mark_transaction_processed(transaction_id).await?;
 
         // Only mark as processed if successful
-        self.proc_queue.mark_processed(transaction_id).await?;
+        self.proc_queue.mark_processed(processible_id).await?;
 
         Ok(Some(processible))
     }
 
-    pub async fn recalculate(&self, transaction_id: ModelId) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
-        trace!("Recalculating transaction with ID: {:?}", &transaction_id);
+    pub async fn recalculate(&self, processible_id: ModelId) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
+        trace!("Recalculating processible with ID: {:?}", &processible_id);
 
         let processible = self
             .processible_storage
-            .get_processible(transaction_id)
+            .get_processible(processible_id)
             .await?;
-        
+
         // Fetch connected transactions and direct connections
-        let connected_transactions = self.fetch_connected_transactions(transaction_id).await?;
-        let direct_connections = self.fetch_direct_connections(transaction_id).await?;
+        let connected_transactions = self.fetch_connected_transactions(processible_id).await?;
+        let direct_connections = self.fetch_direct_connections(processible_id).await?;
         
-        debug!("Extracting features for transaction {:?} in recalculation", &transaction_id);
+        debug!("Extracting features for transaction {:?} in recalculation", processible_id);
         let features = processible.extract_graph_features(
             &connected_transactions,
             &direct_connections
         );
 
-        debug!("Saving features for transaction {:?}", &transaction_id);
+        debug!("Saving features for transaction {:?}", &processible_id);
         
         self.save_features(
-            processible.tx_id(), 
+            processible_id, 
             None, 
             &features
         ).await?;
         
-        self.score_and_save_results(&processible, transaction_id, features).await?;
+        self.score_and_save_results(processible_id, features).await?;
 
         // Only mark as processed if successful
-        self.recalc_queue.mark_processed(transaction_id).await?;
+        self.recalc_queue.mark_processed(processible_id).await?;
 
         Ok(Some(processible))
     
@@ -178,7 +183,7 @@ where
             if let Err(e) = self
                 .common_storage
                 .save_matching_fields(
-                    processible.tx_id(), 
+                    transaction_id, 
                     &matching_fields
                 )
                 .await
@@ -215,7 +220,6 @@ where
 
     async fn score_and_save_results(
         &self, 
-        processible: &P, 
         transaction_id: i64,
         features: Vec<Feature>
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -240,7 +244,7 @@ where
         
         if let Err(e) = self
             .common_storage
-            .save_scores(processible.tx_id(), default_channel_id, total_score, &triggered_rules)
+            .save_scores(transaction_id, default_channel_id, total_score, &triggered_rules)
             .await
         {
             warn!("Failed to save scores for {}: {}", transaction_id, e);

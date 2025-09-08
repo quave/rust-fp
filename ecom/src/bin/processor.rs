@@ -10,8 +10,8 @@ use processing::{
 };
 
 use ecom::{
-    models::Order,
-    ecom_order_storage::EcomOrderStorage,
+    processible::EcomOrder,
+    order_storage::OrderStorage,
     expression_based_scorer::get_expression_based_scorer,
 };
 
@@ -37,13 +37,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     );
     
     // Create model storage
-    let model_storage = Arc::new(EcomOrderStorage::new(&config.common.database_url).await?);
+    let model_storage = Arc::new(OrderStorage::new(&config.common.database_url).await?);
     
     // Create queue
     let proc_queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
     let recalc_queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
     // Create processor
-    let processor = Processor::<Order, ExpressionBasedScorer>::new(
+    let processor = Processor::<EcomOrder, ExpressionBasedScorer>::new(
         config.processor,
         get_expression_based_scorer(),
         common_storage,

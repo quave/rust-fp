@@ -1,5 +1,5 @@
 use std::error::Error;
-use ecom::ecom_import_model::{ImportOrder, ImportOrderItem, ImportCustomerData, ImportBillingData};
+use ecom::import_model::{ImportOrder, ImportOrderItem, ImportCustomerData, ImportBillingData};
 
 mod test_helpers;
 

@@ -7,8 +7,8 @@ use processing::executable_utils::{health_check, import_transaction};
 use common::test_helpers::{setup_test_environment, get_test_database_url};
 use processing::{importer::Importer, queue::QueueService};
 use ecom::{
-    ecom_order_storage::EcomOrderStorage,
-    ecom_import_model::ImportOrder,
+    order_storage::OrderStorage,
+    import_model::ImportOrder,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ async fn test_import_endpoint() -> Result<(), Box<dyn Error + Send + Sync>> {
     let pool = common::test_helpers::create_test_pool().await?;
     common::test_helpers::truncate_processing_tables(&pool).await?;
     
-    let storage = Arc::new(EcomOrderStorage::new(&database_url).await?);
+    let storage = Arc::new(OrderStorage::new(&database_url).await?);
     
     // Create mockall-based queue service with basic expectations
     let mut queue = MockQueueService::new();

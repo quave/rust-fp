@@ -3,11 +3,12 @@ use std::error::Error;
 use axum::Router;
 use processing::{
     executable_utils::{label_transaction, AppState},
-    model::{Label, ModelId, ModelRegistryProvider, WebTransaction},
+    model::{FraudLevel, LabelingResult, ModelId, WebTransaction},
     storage::{CommonStorage, WebStorage}, 
-    ui_model::ModelRegistry,
 };
 use async_trait::async_trait;
+use sea_orm::DatabaseConnection;
+use seaography::Builder;
 
 // Import and re-export centralized mocks for use in API tests
 // Simple local mock implementations - TODO: Move to common when centralized
@@ -55,26 +56,18 @@ impl WebTransaction for MockWebTransaction {
     }
 }
 
-impl ModelRegistryProvider for MockWebTransaction {
-    fn get_registry() -> &'static ModelRegistry {
-        use std::sync::LazyLock;
-        // Return a static registry for testing
-        static REGISTRY: LazyLock<ModelRegistry> = LazyLock::new(|| ModelRegistry {
-            models: std::collections::HashMap::new(),
-            root_model: "test_transaction",
-        });
-        &REGISTRY
-    }
-}
-
 // Implement WebStorage trait for MockWebStorage
 #[async_trait]
 impl WebStorage<MockWebTransaction> for MockWebStorage {
-    async fn get_transactions(&self, _filter: processing::ui_model::FilterRequest) -> Result<Vec<MockWebTransaction>, Box<dyn Error + Send + Sync>> {
-        self.get_transactions().await
+    fn register_seaography_entities(&self, _builder: Builder) -> Builder {
+        unimplemented!()
     }
     
-    async fn get_transaction(&self, transaction_id: ModelId) -> Result<MockWebTransaction, Box<dyn Error + Send + Sync>> {
+    fn get_connection(&self) -> &DatabaseConnection {
+        unimplemented!()
+    }
+
+    async fn get_web_transaction(&self, transaction_id: ModelId) -> Result<MockWebTransaction, Box<dyn Error + Send + Sync>> {
         self.get_transaction(transaction_id).await
     }
 }
@@ -92,9 +85,8 @@ impl MockSuccessStorage {
 
 #[async_trait::async_trait]
 impl CommonStorage for MockSuccessStorage {
-    async fn save_label(&self, _label: &Label) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        Ok(self.next_label_id)
-    }
+    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { unimplemented!() }
 
     async fn update_transaction_label(&self, _transaction_id: ModelId, _label_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
@@ -107,17 +99,16 @@ impl CommonStorage for MockSuccessStorage {
     async fn find_connected_transactions(&self, _transaction_id: ModelId, _max_depth: Option<i32>, _limit_count: Option<i32>, _min_created_at: Option<chrono::DateTime<chrono::Utc>>, _max_created_at: Option<chrono::DateTime<chrono::Utc>>, _min_confidence: Option<i32>) -> Result<Vec<processing::model::ConnectedTransaction>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn get_direct_connections(&self, _transaction_id: ModelId) -> Result<Vec<processing::model::DirectConnection>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn save_matching_fields(&self, _transaction_id: ModelId, _matching_fields: &[processing::model::MatchingField]) -> Result<(), Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<processing::model::Channel>, Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<processing::model::ScoringEvent>, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn get_triggered_rules(&self, _scoring_event_id: ModelId) -> Result<Vec<processing::model::TriggeredRule>, Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_label(&self, _label_id: ModelId) -> Result<Label, Box<dyn Error + Send + Sync>> { 
-        Ok(Label {
-            id: _label_id,
-            fraud_level: processing::model::FraudLevel::NoFraud,
-            fraud_category: "test".to_string(),
-            label_source: processing::model::LabelSource::Manual,
-            labeled_by: "test".to_string(),
-            created_at: chrono::Utc::now(),
+    // removed save_label/get_label from trait
+
+    async fn label_transactions(&self, transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
+        Ok(LabelingResult {
+            label_id: self.next_label_id,
+            success_count: transaction_ids.len(),
+            failed_transaction_ids: vec![],
         })
     }
 }
@@ -126,9 +117,8 @@ pub struct MockSaveLabelErrorStorage;
 
 #[async_trait::async_trait]
 impl CommonStorage for MockSaveLabelErrorStorage {
-    async fn save_label(&self, _label: &Label) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        Err("Failed to save label".into())
-    }
+    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { unimplemented!() }
 
     async fn update_transaction_label(&self, _transaction_id: ModelId, _label_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
@@ -141,10 +131,13 @@ impl CommonStorage for MockSaveLabelErrorStorage {
     async fn find_connected_transactions(&self, _transaction_id: ModelId, _max_depth: Option<i32>, _limit_count: Option<i32>, _min_created_at: Option<chrono::DateTime<chrono::Utc>>, _max_created_at: Option<chrono::DateTime<chrono::Utc>>, _min_confidence: Option<i32>) -> Result<Vec<processing::model::ConnectedTransaction>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn get_direct_connections(&self, _transaction_id: ModelId) -> Result<Vec<processing::model::DirectConnection>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn save_matching_fields(&self, _transaction_id: ModelId, _matching_fields: &[processing::model::MatchingField]) -> Result<(), Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<processing::model::Channel>, Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<processing::model::ScoringEvent>, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn get_triggered_rules(&self, _scoring_event_id: ModelId) -> Result<Vec<processing::model::TriggeredRule>, Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_label(&self, _label_id: ModelId) -> Result<Label, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    // removed save_label/get_label from trait
+    async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
+        Err("Failed to save label".into())
+    }
 }
 
 pub struct MockPartialSuccessStorage {
@@ -160,9 +153,8 @@ impl MockPartialSuccessStorage {
 
 #[async_trait::async_trait]
 impl CommonStorage for MockPartialSuccessStorage {
-    async fn save_label(&self, _label: &Label) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        Ok(self.next_label_id)
-    }
+    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { unimplemented!() }
 
     async fn update_transaction_label(&self, transaction_id: ModelId, _label_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
         if transaction_id == self.successful_tx_id {
@@ -179,10 +171,18 @@ impl CommonStorage for MockPartialSuccessStorage {
     async fn find_connected_transactions(&self, _transaction_id: ModelId, _max_depth: Option<i32>, _limit_count: Option<i32>, _min_created_at: Option<chrono::DateTime<chrono::Utc>>, _max_created_at: Option<chrono::DateTime<chrono::Utc>>, _min_confidence: Option<i32>) -> Result<Vec<processing::model::ConnectedTransaction>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn get_direct_connections(&self, _transaction_id: ModelId) -> Result<Vec<processing::model::DirectConnection>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn save_matching_fields(&self, _transaction_id: ModelId, _matching_fields: &[processing::model::MatchingField]) -> Result<(), Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<processing::model::Channel>, Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<processing::model::ScoringEvent>, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn get_channels(&self, _model_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    async fn get_scoring_events(&self, _transaction_id: ModelId) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>> { unimplemented!() }
     async fn get_triggered_rules(&self, _scoring_event_id: ModelId) -> Result<Vec<processing::model::TriggeredRule>, Box<dyn Error + Send + Sync>> { unimplemented!() }
-    async fn get_label(&self, _label_id: ModelId) -> Result<Label, Box<dyn Error + Send + Sync>> { unimplemented!() }
+    // removed save_label/get_label from trait
+    async fn label_transactions(&self, transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
+        let mut success_count = 0;
+        let mut failed = Vec::new();
+        for &id in transaction_ids {
+            if id == self.successful_tx_id { success_count += 1; } else { failed.push(id); }
+        }
+        Ok(LabelingResult { label_id: self.next_label_id, success_count, failed_transaction_ids: failed })
+    }
 }
 
 // Helper function to create test app - now uses centralized mocks

@@ -2,11 +2,11 @@ use processing::{
     model::MatchingField,
     storage::CommonStorage,
 };
-use common::test_helpers::truncate_processing_tables;
+use common::test_helpers::{truncate_processing_tables, create_test_transaction};
 use std::error::Error;
 use serial_test::serial;
 
-use super::setup::{get_test_storage, create_test_transaction};
+use super::setup::{get_test_storage};
 
 #[tokio::test]
 #[serial]
@@ -17,8 +17,8 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     truncate_processing_tables(&pool).await?;
     
     // Create transactions to test with
-    let transaction_id1 = create_test_transaction(&storage).await?;
-    let transaction_id2 = create_test_transaction(&storage).await?;
+    let transaction_id1 = create_test_transaction(&pool).await?;
+    let transaction_id2 = create_test_transaction(&pool).await?;
     
     // Create custom matching config using HashMap - define values explicitly for test
     let mut matcher_configs = std::collections::HashMap::new();
@@ -136,7 +136,7 @@ async fn test_save_matching_fields_empty() -> Result<(), Box<dyn Error + Send + 
     truncate_processing_tables(&pool).await?;
     
     // Create a transaction
-    let transaction_id = create_test_transaction(&storage).await?;
+    let transaction_id = create_test_transaction(&pool).await?;
     
     // Create empty matching fields list
     let empty_fields: Vec<MatchingField> = vec![];

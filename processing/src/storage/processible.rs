@@ -8,4 +8,10 @@ pub trait ProcessibleStorage<P: Processible>: Send + Sync {
         &self,
         transaction_id: ModelId,
     ) -> Result<P, Box<dyn Error + Send + Sync>>;
+
+    async fn set_transaction_id(
+        &self,
+        processible_id: ModelId,
+        transaction_id: ModelId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
