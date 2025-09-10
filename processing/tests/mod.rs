@@ -1,4 +1,5 @@
 // Test modules
+pub mod mocks;
 pub mod scorers;
 pub mod processor_tests;
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
 use processing::model::Processible;
-use super::mocks::{TestTransaction, MockCommonStorage, MockProcessibleStorage, MockQueueService, create_high_value_scorer, create_low_value_scorer};
+use super::super::mocks::{TestTransaction, MockQueueService, create_mock_processible_storage, create_high_value_scorer, create_low_value_scorer, create_mock_common_storage};
 
 #[tokio::test]
 async fn test_processor_with_high_value_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -12,8 +12,8 @@ async fn test_processor_with_high_value_transaction() -> Result<(), Box<dyn Erro
     let features = transaction.extract_simple_features();
     
     // Set up mocks
-    let storage = MockCommonStorage::new(features);
-    let processible_storage = MockProcessibleStorage::new(transaction);
+    let storage = create_mock_common_storage(None, features);
+    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next().returning(|| Ok(Some(1)));
@@ -23,7 +23,7 @@ async fn test_processor_with_high_value_transaction() -> Result<(), Box<dyn Erro
     let scorer = create_high_value_scorer();
     
     // Create processor
-    let processor = Processor::new(
+    let processor = Processor::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage),
@@ -51,8 +51,8 @@ async fn test_processor_with_low_value_transaction() -> Result<(), Box<dyn Error
     let features = transaction.extract_simple_features();
     
     // Set up mocks
-    let storage = MockCommonStorage::new(features);
-    let processible_storage = MockProcessibleStorage::new(transaction);
+    let storage = create_mock_common_storage(None, features);
+    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next().returning(|| Ok(Some(2)));
@@ -62,7 +62,7 @@ async fn test_processor_with_low_value_transaction() -> Result<(), Box<dyn Error
     let scorer = create_low_value_scorer();
     
     // Create processor
-    let processor = Processor::new(
+    let processor = Processor::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage),
@@ -90,8 +90,8 @@ async fn test_processor_with_empty_queue() -> Result<(), Box<dyn Error + Send + 
     let features = transaction.extract_simple_features();
     
     // Set up mocks with empty queue
-    let storage = MockCommonStorage::new(features);
-    let processible_storage = MockProcessibleStorage::new(transaction);
+    let storage = create_mock_common_storage(None, features);
+    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next().returning(|| Ok(None)); // Empty queue
@@ -101,7 +101,7 @@ async fn test_processor_with_empty_queue() -> Result<(), Box<dyn Error + Send + 
     let scorer = create_high_value_scorer();
     
     // Create processor
-    let processor = Processor::new(
+    let processor = Processor::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage),
@@ -171,8 +171,8 @@ async fn test_processor_scorer_integration() -> Result<(), Box<dyn Error + Send 
     let features = transaction.extract_simple_features();
     
     // Set up mocks
-    let storage = MockCommonStorage::new(features);
-    let processible_storage = MockProcessibleStorage::new(transaction);
+    let storage = create_mock_common_storage(None, features);
+    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next().returning(|| Ok(Some(1)));
@@ -182,7 +182,7 @@ async fn test_processor_scorer_integration() -> Result<(), Box<dyn Error + Send 
     let scorer = create_high_value_scorer();
     
     // Create processor
-    let processor = Processor::new(
+    let processor = Processor::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage),

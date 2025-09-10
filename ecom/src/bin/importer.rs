@@ -15,13 +15,7 @@ use ecom::{
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("Starting importer...");
     let config = initialize_executable()?;
-    
-    // Create storage
     let storage = Arc::new(OrderStorage::new(&config.common.database_url).await?);
-    
-    // Create queue
     let queue = Arc::new(ProdQueue::new(&config.common.database_url).await?);
-    
-    // Run with concrete types
     run_importer::<ImportOrder>(config.importer, storage, queue).await
 }

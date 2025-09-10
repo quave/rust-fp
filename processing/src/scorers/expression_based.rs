@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use evalexpr::*;
 use crate::{
-    model::{Feature, ScorerResult},
+    model::{ScorerResult, Feature},
     scorers::Scorer,
 };
 

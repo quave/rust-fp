@@ -1,6 +1,7 @@
-use crate::model::*;
+use crate::{model::*, model::Feature};
 use async_trait::async_trait;
 use std::error::Error;
+use crate::model::{Channel, ScoringEvent, TriggeredRule};
 
 #[async_trait]
 pub trait CommonStorage: Send + Sync {
@@ -13,11 +14,11 @@ pub trait CommonStorage: Send + Sync {
         transaction_id: ModelId,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
-    async fn save_features(
+    async fn save_features<'a>(
         &self,
         transaction_id: ModelId,
-        simple_features: Option<&[Feature]>,
-        graph_features: &[Feature],
+        simple_features: &'a Option<&'a[Feature]>,
+        graph_features: &'a [Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     async fn save_scores(
@@ -57,12 +58,12 @@ pub trait CommonStorage: Send + Sync {
     async fn get_channels(
         &self,
         model_id: ModelId,
-    ) -> Result<Vec<crate::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>>;
+    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>>;
     
     async fn get_scoring_events(
         &self,
         transaction_id: ModelId,
-    ) -> Result<Vec<crate::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>>;
+    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>>;
     
     async fn get_triggered_rules(
         &self,
@@ -75,12 +76,12 @@ pub trait CommonStorage: Send + Sync {
         label_id: ModelId,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
     
-    /// Label multiple transactions with the same label in a batch operation
     async fn label_transactions(
         &self,
         transaction_ids: &[ModelId],
         fraud_level: FraudLevel,
         fraud_category: String,
+        label_source: LabelSource,
         labeled_by: String,
-    ) -> Result<LabelingResult, Box<dyn Error + Send + Sync>>;
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
 } 

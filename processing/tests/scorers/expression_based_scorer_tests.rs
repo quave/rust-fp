@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
 use processing::{
-    model::{Feature, FeatureValue},
-    scorers::ExpressionBasedScorer,
-    scorers::Scorer,
+    model::{FeatureValue, Feature},
+    scorers::{ExpressionBasedScorer, Scorer},
 };
 
 #[tokio::test]

@@ -3,18 +3,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::Utc;
 use async_trait::async_trait;
-
+use seaography::Builder;
+use sea_orm::DatabaseConnection;
 use processing::{
     model::*,
+    storage::{CommonStorage, WebStorage, ProcessibleStorage}, 
     queue::QueueService,
-    storage::{ProcessibleStorage, CommonStorage},
 };
 
 // Test transaction struct for processor tests
 #[derive(Debug, Clone)]
 pub struct TestTransaction {
     pub id: ModelId,
-    pub transaction_id: ModelId,
     pub is_high_value: bool,
     pub created_at: chrono::DateTime<Utc>,
     // Add connection verification fields
@@ -24,10 +24,9 @@ pub struct TestTransaction {
 }
 
 impl TestTransaction {
-    pub fn new(id: ModelId, transaction_id: ModelId, is_high_value: bool) -> Self {
+    pub fn new(id: ModelId, is_high_value: bool) -> Self {
         Self {
             id,
-            transaction_id,
             is_high_value,
             created_at: Utc::now(),
             expected_connected_ids: None,
@@ -37,23 +36,21 @@ impl TestTransaction {
     }
 
     pub fn high_value() -> Self {
-        Self::new(1, 1, true)
+        Self::new(1, true)
     }
 
     pub fn low_value() -> Self {
-        Self::new(2, 2, false)
+        Self::new(2, false)
     }
     
     // Add constructor for connection verification
     pub fn connection_verifying(
         id: ModelId, 
-        transaction_id: ModelId,
         expected_connected_ids: Vec<ModelId>,
         expected_direct_ids: Vec<ModelId>
     ) -> Self {
         Self {
             id,
-            transaction_id,
             is_high_value: false,
             created_at: Utc::now(),
             expected_connected_ids: Some(expected_connected_ids),
@@ -192,114 +189,166 @@ impl Processible for TestTransaction {
     }
 }
 
-// Mock Common Storage
-#[derive(Debug, Clone)]
-pub struct MockCommonStorage {
-    pub features: Vec<Feature>,
-}
+// Direct Scorer implementation using mockall - OPTIMAL FIRST approach
+mock! {
+    ScorerService {}
 
-impl MockCommonStorage {
-    pub fn new(features: Vec<Feature>) -> Self {
-        Self { features }
+    #[async_trait]
+    impl processing::scorers::Scorer for ScorerService {
+        async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult>;
     }
 }
 
+mock! {
+    pub CommonStorage {}
+
+    #[async_trait]
+    impl CommonStorage for CommonStorage {
+        async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>>;
+        async fn mark_transaction_processed(&self, transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
+        async fn save_features<'a>(
+            &self,
+            transaction_id: ModelId,
+            simple_features: &'a Option<&'a[Feature]>,
+            graph_features: &'a [Feature],
+        ) -> Result<(), Box<dyn Error + Send + Sync>>;
+        
+        async fn get_features(
+            &self,
+            _transaction_id: i64,
+        ) -> Result<(Option<Vec<Feature>>, Vec<Feature>), Box<dyn Error + Send + Sync>>;
+    
+        async fn save_scores(
+            &self,
+            _transaction_id: i64,
+            _channel_id: i64,
+            _total_score: i32,
+            _triggered_rules: &[TriggeredRule],
+        ) -> Result<(), Box<dyn Error + Send + Sync>>;
+    
+        async fn find_connected_transactions(
+            &self,
+            _transaction_id: i64,
+            _max_depth: Option<i32>,
+            _limit_count: Option<i32>,
+            _min_created_at: Option<chrono::DateTime<chrono::Utc>>,
+            _max_created_at: Option<chrono::DateTime<chrono::Utc>>,
+            _min_confidence: Option<i32>,
+        ) -> Result<Vec<ConnectedTransaction>, Box<dyn Error + Send + Sync>>;
+    
+        async fn get_direct_connections(
+            &self,
+            _transaction_id: ModelId
+        ) -> Result<Vec<DirectConnection>, Box<dyn Error + Send + Sync>>;
+    
+        async fn save_matching_fields(
+            &self,
+            _transaction_id: i64,
+            _matching_fields: &[MatchingField],
+        ) -> Result<(), Box<dyn Error + Send + Sync>>;
+    
+        async fn get_channels(
+            &self,
+            _model_id: ModelId,
+        ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>>;
+    
+        async fn get_scoring_events(
+            &self,
+            _transaction_id: ModelId,
+        ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>>;
+    
+        async fn get_triggered_rules(
+            &self,
+            _scoring_event_id: ModelId,
+        ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>>;
+    
+        async fn update_transaction_label(
+            &self,
+            _transaction_id: ModelId,
+            _label_id: ModelId,
+        ) -> Result<(), Box<dyn Error + Send + Sync>>;
+    
+        async fn label_transactions(
+            &self, 
+            _transaction_ids: &[ModelId], 
+            _fraud_level: FraudLevel,
+            _fraud_category: String,
+            _label_source: LabelSource,
+            _labeled_by: String
+        ) -> Result<(), Box<dyn Error + Send + Sync>>;
+    }
+}
+
+pub fn create_mock_common_storage(tx_id: Option<i64>, features: Vec<Feature>) -> MockCommonStorage {
+    let mut mock = MockCommonStorage::new();
+    let default_tx_id = 1;
+    
+    mock.expect_save_transaction().returning(move|| Ok(tx_id.unwrap_or(default_tx_id)));
+    mock.expect_mark_transaction_processed().returning(|_| Ok(()));
+    mock.expect_save_features().returning(|_, _, _| Ok(()));
+    mock.expect_get_features().returning( move |arg_tx_id|  {
+        assert_eq!(tx_id.unwrap_or(default_tx_id), arg_tx_id);
+        Ok((Some(features.clone()), features.clone()))
+    });
+    mock.expect_save_scores().returning(|_, _, _, _| Ok(()));
+    mock.expect_find_connected_transactions().returning(|_, _, _, _, _, _| Ok(vec![]));
+    mock.expect_get_direct_connections().returning(|_| Ok(vec![]));
+    mock.expect_save_matching_fields().returning(|_, _| Ok(()));
+    mock.expect_get_channels().returning(|_| Ok(vec![]));
+    mock.expect_get_scoring_events().returning(|_| Ok(vec![]));
+    mock.expect_get_triggered_rules().returning(|_| Ok(vec![]));
+    mock.expect_update_transaction_label().returning(|_, _| Ok(()));
+    
+    mock
+}
+
+// Import and re-export centralized mocks for use in API tests
+// Simple local mock implementations - TODO: Move to common when centralized
+#[derive(Clone, serde::Serialize)]
+pub struct MockWebTransaction {
+    pub id: ModelId,
+}
+
+impl MockWebTransaction {
+    pub fn new(id: ModelId) -> Self {
+        Self { id }
+    }
+    
+    pub fn get_id(&self) -> ModelId {
+        self.id
+    }
+}
+
+// Implement the required traits for MockWebTransaction
 #[async_trait]
-impl CommonStorage for MockCommonStorage {
-    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { Ok(1) }
-    async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { Ok(()) }
-
-    async fn save_features(
-        &self,
-        _transaction_id: i64,
-        _simple_features: Option<&[Feature]>,
-        _graph_features: &[Feature],
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
+impl WebTransaction for MockWebTransaction {
+    fn id(&self) -> ModelId {
+        self.get_id()
     }
+}
 
-    async fn get_features(
-        &self,
-        _transaction_id: i64,
-    ) -> Result<(Option<Vec<Feature>>, Vec<Feature>), Box<dyn Error + Send + Sync>> {
-        Ok((Some(self.features.clone()), self.features.clone()))
+
+
+mock!{
+    pub WebStorage {}
+
+    #[async_trait]
+    impl WebStorage<MockWebTransaction> for WebStorage {
+        fn register_seaography_entities(&self, builder: Builder) -> Builder;
+        fn get_connection(&self) -> &DatabaseConnection;
+        async fn get_web_transaction(&self, transaction_id: ModelId) -> Result<MockWebTransaction, Box<dyn Error + Send + Sync>>;
     }
+}
 
-    async fn save_scores(
-        &self,
-        _transaction_id: i64,
-        _channel_id: i64,
-        _total_score: i32,
-        _triggered_rules: &[TriggeredRule],
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
-    }
-
-    async fn find_connected_transactions(
-        &self,
-        _transaction_id: i64,
-        _max_depth: Option<i32>,
-        _limit_count: Option<i32>,
-        _min_created_at: Option<chrono::DateTime<chrono::Utc>>,
-        _max_created_at: Option<chrono::DateTime<chrono::Utc>>,
-        _min_confidence: Option<i32>,
-    ) -> Result<Vec<ConnectedTransaction>, Box<dyn Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
-
-    async fn get_direct_connections(
-        &self,
-        _transaction_id: ModelId
-    ) -> Result<Vec<DirectConnection>, Box<dyn Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
-
-    async fn save_matching_fields(
-        &self,
-        _transaction_id: i64,
-        _matching_fields: &[MatchingField],
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
-    }
-
-    async fn get_channels(
-        &self,
-        _model_id: ModelId,
-    ) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
-
-    async fn get_scoring_events(
-        &self,
-        _transaction_id: ModelId,
-    ) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
-
-    async fn get_triggered_rules(
-        &self,
-        _scoring_event_id: ModelId,
-    ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>> {
-        Ok(Vec::new())
-    }
-
-    // removed save_label/get_label from trait
-
-    async fn update_transaction_label(
-        &self,
-        _transaction_id: ModelId,
-        _label_id: ModelId,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
-    }
-
-    async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
-        Ok(LabelingResult {
-            label_id: 1,
-            success_count: 0,
-            failed_transaction_ids: vec![],
-        })
-    }
+pub fn create_mock_web_storage(transactions: Vec<MockWebTransaction>) -> MockWebStorage {
+    let mut mock_web_storage = MockWebStorage::new();
+    mock_web_storage.expect_get_web_transaction().returning(move |transaction_id| {
+        transactions.iter()
+            .find(|t| t.id == transaction_id)
+            .cloned()
+            .ok_or_else(|| format!("Transaction {} not found", transaction_id).into())
+    });
+    mock_web_storage
 }
 
 // Connection tracking storage for testing
@@ -329,11 +378,11 @@ impl CommonStorage for ConnectionTrackingStorage {
     async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { Ok(1) }
     async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { Ok(()) }
 
-    async fn save_features(
+    async fn save_features<'a>(
         &self,
         _transaction_id: i64,
-        _simple_features: Option<&[Feature]>,
-        graph_features: &[Feature],
+        _simple_features: &'a Option<&'a [Feature]>,
+        graph_features: &'a [Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.save_features_called.store(true, Ordering::Relaxed);
         
@@ -398,14 +447,14 @@ impl CommonStorage for ConnectionTrackingStorage {
     async fn get_channels(
         &self,
         _model_id: ModelId,
-    ) -> Result<Vec<processing::storage::sea_orm_storage_model::channel::Model>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
         Ok(Vec::new())
     }
 
     async fn get_scoring_events(
         &self,
         _transaction_id: ModelId,
-    ) -> Result<Vec<processing::storage::sea_orm_storage_model::scoring_event::Model>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
         Ok(Vec::new())
     }
 
@@ -426,46 +475,31 @@ impl CommonStorage for ConnectionTrackingStorage {
         Ok(())
     }
 
-    async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _labeled_by: String) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
-        Ok(LabelingResult {
-            label_id: 1,
-            success_count: 0,
-            failed_transaction_ids: vec![],
-        })
+    async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _label_source: LabelSource, _labeled_by: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+        Ok(())
     }
 }
 
-// Mock Processible Storage
-#[derive(Debug, Clone)]
-pub struct MockProcessibleStorage {
-    pub transaction: Option<TestTransaction>,
-}
+// Mock ProcessibleStorage using mockall - much cleaner than custom adapter!
+mock! {
+    pub ProcessibleStorage {}
 
-impl MockProcessibleStorage {
-    pub fn new(transaction: TestTransaction) -> Self {
-        Self { transaction: Some(transaction) }
+    #[async_trait]
+    impl ProcessibleStorage<TestTransaction> for ProcessibleStorage {
+        async fn get_processible(&self, transaction_id: i64) -> Result<TestTransaction, Box<dyn std::error::Error + Send + Sync>>;
+        async fn set_transaction_id(&self, processible_id: i64, transaction_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     }
 }
 
-#[async_trait]
-impl ProcessibleStorage<TestTransaction> for MockProcessibleStorage {
-    async fn get_processible(
-        &self,
-        _transaction_id: ModelId,
-    ) -> Result<TestTransaction, Box<dyn Error + Send + Sync>> {
-        match &self.transaction {
+pub fn create_mock_processible_storage(transaction: Option<TestTransaction>) -> MockProcessibleStorage {
+    let mut mock_processible_storage = MockProcessibleStorage::new();
+        mock_processible_storage.expect_get_processible().returning( move |_| match transaction.clone() {
             Some(tx) => Ok(tx.clone()),
             None => Err("Transaction not found".into()),
         }
-    }
-
-    async fn set_transaction_id(
-        &self,
-        _processible_id: ModelId,
-        _transaction_id: ModelId,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
-    }
+    );
+    mock_processible_storage.expect_set_transaction_id().returning(|_, _| Ok(()));
+    mock_processible_storage
 }
 
 // Direct MockQueueService implementation using mockall - OPTIMAL FIRST approach

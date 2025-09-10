@@ -29,7 +29,7 @@ async fn test_save_and_get_label() -> Result<(), Box<dyn Error + Send + Sync>> {
     };
     
     // Save label via SeaORM directly (trait no longer exposes save_label)
-    use processing::storage::sea_orm_storage_model as entities;
+    use processing::model::sea_orm_storage_model as entities;
     use sea_orm::{ActiveModelTrait, Set};
     let db = &storage.db;
     let label_am = entities::label::ActiveModel {
@@ -93,7 +93,7 @@ async fn test_save_label_with_different_fraud_levels() -> Result<(), Box<dyn Err
         };
         
         // Save label
-        use processing::storage::sea_orm_storage_model as entities;
+        use processing::model::sea_orm_storage_model as entities;
         use sea_orm::{ActiveModelTrait, Set};
         let db = &storage.db;
         let am = entities::label::ActiveModel {
@@ -141,7 +141,7 @@ async fn test_save_label_with_different_sources() -> Result<(), Box<dyn Error + 
         };
         
         // Save label via SeaORM
-        use processing::storage::sea_orm_storage_model as entities;
+        use processing::model::sea_orm_storage_model as entities;
         use sea_orm::{ActiveModelTrait, Set};
         let db = &storage.db;
         let am = entities::label::ActiveModel {
@@ -196,7 +196,7 @@ async fn test_update_transaction_label() -> Result<(), Box<dyn Error + Send + Sy
     };
     
     // Save label via SeaORM
-    use processing::storage::sea_orm_storage_model as entities;
+    use processing::model::sea_orm_storage_model as entities;
     use sea_orm::{ActiveModelTrait, Set};
     let db = &storage.db;
     let am = entities::label::ActiveModel {
@@ -246,7 +246,7 @@ async fn test_update_nonexistent_transaction_label() -> Result<(), Box<dyn Error
     };
     
     // Save label via SeaORM
-    use processing::storage::sea_orm_storage_model as entities;
+    use processing::model::sea_orm_storage_model as entities;
     use sea_orm::{ActiveModelTrait, Set};
     let db = &storage.db;
     let am = entities::label::ActiveModel {
@@ -313,7 +313,7 @@ async fn test_update_transaction_label_multiple_times() -> Result<(), Box<dyn Er
     };
     
     // Save first label
-    use processing::storage::sea_orm_storage_model as entities;
+    use processing::model::sea_orm_storage_model as entities;
     use sea_orm::{ActiveModelTrait, Set};
     let db = &storage.db;
     let am1 = entities::label::ActiveModel {

@@ -5,7 +5,7 @@ DROP TABLE IF EXISTS triggered_rules CASCADE;
 DROP TABLE IF EXISTS processing_queue CASCADE;
 DROP TABLE IF EXISTS scoring_events CASCADE;
 DROP TABLE IF EXISTS channels CASCADE;
-DROP TABLE IF EXISTS models CASCADE;
+DROP TABLE IF EXISTS scoring_models CASCADE;
 DROP TABLE IF EXISTS labels CASCADE;
 DROP TABLE IF EXISTS scoring_rules CASCADE;
 
@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_label_id ON transactions(label_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_last_scoring_date ON transactions(last_scoring_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_processing_complete ON transactions(processing_complete);
 
-CREATE TABLE IF NOT EXISTS models (
+CREATE TABLE IF NOT EXISTS scoring_models (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     features_schema_version_major INTEGER NOT NULL,
@@ -45,10 +45,10 @@ CREATE TABLE IF NOT EXISTS models (
     model_type TEXT NOT NULL DEFAULT 'rule_based',
     created_at TIMESTAMP NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_models_created_at ON models(created_at);
-CREATE INDEX IF NOT EXISTS idx_models_model_type_version ON models(model_type, version);
-CREATE INDEX IF NOT EXISTS idx_models_features_schema_version_major_minor 
-    ON models(features_schema_version_major, features_schema_version_minor);
+CREATE INDEX IF NOT EXISTS idx_scoring_models_created_at ON scoring_models(created_at);
+CREATE INDEX IF NOT EXISTS idx_scoring_models_model_type_version ON scoring_models(model_type, version);
+CREATE INDEX IF NOT EXISTS idx_scoring_models_features_schema_version_major_minor 
+    ON scoring_models(features_schema_version_major, features_schema_version_minor);
 
 
 CREATE TABLE IF NOT EXISTS channels (
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS channels (
     name TEXT NOT NULL,
     model_id BIGINT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+    FOREIGN KEY (model_id) REFERENCES scoring_models(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_channels_created_at ON channels(created_at);
 CREATE INDEX IF NOT EXISTS idx_channels_model_id ON channels(model_id);
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS scoring_rules (
     rule JSONB NOT NULL,
     score INTEGER NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+    FOREIGN KEY (model_id) REFERENCES scoring_models(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_scoring_rules_model_id ON scoring_rules(model_id);
 CREATE INDEX IF NOT EXISTS idx_scoring_rules_name ON scoring_rules(name);

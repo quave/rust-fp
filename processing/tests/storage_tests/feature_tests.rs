@@ -1,7 +1,7 @@
 use chrono::Utc;
 use processing::{
-    model::{Feature, FeatureValue, ModelId},
-    storage::CommonStorage,
+    model::{FeatureValue, ModelId, Feature},
+    storage::{CommonStorage},
 };
 use common::test_helpers::truncate_processing_tables;
 use serde_json::json;
@@ -43,7 +43,7 @@ async fn test_save_and_get_features() -> Result<(), Box<dyn Error + Send + Sync>
     ];
     
     storage
-        .save_features(transaction_id, Some(&initial_simple_features), &features)
+        .save_features(transaction_id, &Some(&initial_simple_features), &features)
         .await
         .map_err(|e| "save_features initial ".to_string() + &e.to_string())?;
     
@@ -60,7 +60,7 @@ async fn test_save_and_get_features() -> Result<(), Box<dyn Error + Send + Sync>
     ];
     
     storage
-        .save_features(transaction_id, None, &updated_features)
+        .save_features(transaction_id, &None, &updated_features)
         .await
         .map_err(|e| "save_features update ".to_string() + &e.to_string())?;
     
@@ -140,7 +140,7 @@ async fn test_save_features_with_complex_values() -> Result<(), Box<dyn Error + 
         },
     ];
     
-    storage.save_features(transaction_id, Some(&initial_simple_features), &initial_graph_features).await?;
+    storage.save_features(transaction_id, &Some(&initial_simple_features), &initial_graph_features).await?;
     
     // Now update with None simple_features and complex graph features
     let complex_features = vec![
@@ -159,7 +159,7 @@ async fn test_save_features_with_complex_values() -> Result<(), Box<dyn Error + 
     ];
     
     // Save complex features (this calls UPDATE)
-    storage.save_features(transaction_id, None, &complex_features).await?;
+    storage.save_features(transaction_id, &None, &complex_features).await?;
     
     // Retrieve features
     let (simple_features, graph_features) = storage.get_features(transaction_id).await?;
@@ -256,7 +256,7 @@ async fn test_save_features_with_invalid_schema() -> Result<(), Box<dyn Error + 
     ];
 
     // Try to save invalid features
-    let result = storage.save_features(transaction_id, None, &invalid_features).await;
+    let result = storage.save_features(transaction_id, &None, &invalid_features).await;
     assert!(result.is_err());
     let err_str = result.unwrap_err().to_string();
     assert!(err_str.contains("validation failed"), "Expected validation error, got: {}", err_str);

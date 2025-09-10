@@ -1,5 +1,5 @@
 use processing::model::Processible;
-use super::mocks::TestTransaction;
+use super::super::mocks::TestTransaction;
 use common::{test_assert_eq, test_feature_value, test_assert};
 use common::test_helpers::{TestResult, TestError};
 

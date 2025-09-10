@@ -2,7 +2,7 @@ use async_graphql::http::GraphiQLSource;
 use clap::Parser;
 use std::{error::Error, fmt::Debug, sync::Arc};
 use axum::{
-    extract::Json, http::StatusCode, response::{self, IntoResponse}, routing::{get, post}, Router
+    extract::Json, http::StatusCode, response::{self, IntoResponse, Response}, routing::{get, post}, Router
 };
 use async_graphql_axum::GraphQL;
 use tower_http::{
@@ -13,7 +13,7 @@ use http::header;
 use common::config::{Config, ImporterConfig, BackendConfig};
 use crate::{
     importer::Importer,
-    model::{FraudLevel, Importable, ImportableSerde, ModelId, WebTransaction},
+    model::{FraudLevel, Importable, ImportableSerde, LabelSource, ModelId, WebTransaction},
     queue::QueueService,
     storage::{CommonStorage, ImportableStorage, WebStorage},
 };
@@ -191,7 +191,7 @@ pub struct LabelRequest {
 pub async fn label_transaction<T: WebTransaction + Send + Sync>(
     axum::extract::State(state): axum::extract::State<AppState<T>>,
     Json(label_request): Json<LabelRequest>,
-) -> impl IntoResponse 
+) -> Response 
 {
     // Log the incoming request
     tracing::info!(
@@ -205,36 +205,12 @@ pub async fn label_transaction<T: WebTransaction + Send + Sync>(
         &label_request.transaction_ids,
         label_request.fraud_level,
         label_request.fraud_category,
+        LabelSource::Manual,
         label_request.labeled_by,
     ).await {
-        Ok(result) => {
-            if result.is_complete_success() {
-                tracing::info!("Successfully labeled all {} transactions", result.success_count);
-                (StatusCode::OK, Json(result.label_id)).into_response()
-            } else if result.is_partial_success() {
-                let message = format!(
-                    "Partially successful: labeled {}/{} transactions. Failed IDs: {:?}",
-                    result.success_count, 
-                    label_request.transaction_ids.len(), 
-                    result.failed_transaction_ids
-                );
-                tracing::warn!(
-                    success_count = %result.success_count,
-                    total_count = %label_request.transaction_ids.len(),
-                    failed_ids = ?result.failed_transaction_ids,
-                    "Partially successful labeling request"
-                );
-                (StatusCode::PARTIAL_CONTENT, message).into_response()
-            } else {
-                // Complete failure
-                let message = format!("Failed to label any transactions. Failed IDs: {:?}", result.failed_transaction_ids);
-                tracing::error!(
-                    total_count = %label_request.transaction_ids.len(),
-                    failed_ids = ?result.failed_transaction_ids,
-                    "Complete failure in labeling request"
-                );
-                (StatusCode::INTERNAL_SERVER_ERROR, message).into_response()
-            }
+        Ok(()) => {
+            tracing::info!("Successfully labeled all {} transactions", label_request.transaction_ids.len());
+            StatusCode::OK.into_response()
         }
         Err(e) => {
             tracing::error!(

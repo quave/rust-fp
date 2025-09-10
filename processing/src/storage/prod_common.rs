@@ -1,7 +1,8 @@
 use crate::model::*;
 use crate::storage::common::CommonStorage;
-use crate::storage::MatcherConfig;
-use crate::storage::sea_orm_storage_model as entities;
+use crate::model::LabelSource;
+use crate::model::{Feature, Channel, ScoringEvent, TriggeredRule, MatcherConfig};
+use crate::model::sea_orm_storage_model as entities;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use jsonschema::validate;
@@ -220,11 +221,11 @@ impl CommonStorage for ProdCommonStorage {
         Ok(())
     }
 
-    async fn save_features(
+    async fn save_features<'a>(
         &self,
         transaction_id: ModelId,
-        simple_features: Option<&[Feature]>,
-        graph_features: &[Feature],
+        simple_features: &'a Option<&'a[Feature]>,
+        graph_features: &'a [Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Validate features against schema if one is provided
 
@@ -448,14 +449,15 @@ impl CommonStorage for ProdCommonStorage {
     async fn get_channels(
         &self,
         model_id: ModelId,
-    ) -> Result<Vec<entities::channel::Model>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<Channel>, Box<dyn Error + Send + Sync>> {
         let rows = entities::channel::Entity::find()
             .filter(entities::channel::Column::ModelId.eq(model_id))
             .all(&self.db)
             .await?;
-        let channels: Vec<entities::channel::Model> = rows
+        
+        let channels: Vec<Channel> = rows
             .into_iter()
-            .map(|row| row)
+            .map(|row| Channel { id: row.id, name: row.name, model_id: row.model_id, created_at: row.created_at })
             .collect();
         
         Ok(channels)
@@ -464,7 +466,7 @@ impl CommonStorage for ProdCommonStorage {
     async fn get_scoring_events(
         &self,
         transaction_id: ModelId,
-    ) -> Result<Vec<entities::scoring_event::Model>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<ScoringEvent>, Box<dyn Error + Send + Sync>> {
         let rows = entities::scoring_event::Entity::find()
             .filter(entities::scoring_event::Column::TransactionId.eq(transaction_id))
             .order_by_desc(entities::scoring_event::Column::CreatedAt)
@@ -518,46 +520,23 @@ impl CommonStorage for ProdCommonStorage {
         transaction_ids: &[ModelId],
         fraud_level: FraudLevel,
         fraud_category: String,
+        label_source: LabelSource,
         labeled_by: String,
-    ) -> Result<LabelingResult, Box<dyn Error + Send + Sync>> {
-        // Save the label and get its ID
-        let am = entities::label::ActiveModel {
-            id: NotSet,
-            fraud_level: Set(fraud_level),
-            fraud_category: Set(fraud_category.clone()),
-            label_source: Set(LabelSource::Manual),
-            labeled_by: Set(labeled_by.clone()),
-            created_at: Set(Utc::now().naive_utc()),
-        };
-        let label_model = am.insert(&self.db).await?;
-        let label_id = label_model.id;
-        
-        let mut success_count = 0;
-        let mut failed_transaction_ids = Vec::new();
-        
-        // Apply the label to each transaction ID in the batch
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         for &transaction_id in transaction_ids {
-            match self.update_transaction_label(transaction_id, label_id).await {
-                Ok(_) => {
-                    success_count += 1;
-                    tracing::info!("Successfully labeled transaction {}: label_id={}", transaction_id, label_id);
-                },
-                Err(e) => {
-                    tracing::error!(
-                        error = %e,
-                        transaction_id = %transaction_id,
-                        label_id = %label_id,
-                        "Failed to update transaction with label"
-                    );
-                    failed_transaction_ids.push(transaction_id);
-                }
-            }
+            let label_model = entities::label::ActiveModel {
+                id: NotSet,
+                fraud_level: Set(fraud_level),
+                fraud_category: Set(fraud_category.clone()),
+                label_source: Set(label_source),
+                labeled_by: Set(labeled_by.clone()),
+                created_at: Set(chrono::Utc::now().naive_utc()),
+            }.insert(&self.db).await?;
+            let label_id = label_model.id;
+            
+            self.update_transaction_label(transaction_id, label_id).await?
         }
         
-        Ok(LabelingResult {
-            label_id,
-            success_count,
-            failed_transaction_ids,
-        })
+        Ok(())
     }
 } 

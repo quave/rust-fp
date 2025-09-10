@@ -2,47 +2,9 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use chrono::{NaiveDateTime, DateTime, Utc};
 use evalexpr::Value as EvalValue;
+
+use crate::model::{FeatureValue, ScoringModelType, FraudLevel, LabelSource};
  
-// Shared enums used by entities
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "Text")]
-pub enum FraudLevel {
-    #[sea_orm(string_value = "Fraud")] 
-    Fraud,
-    #[sea_orm(string_value = "NoFraud")] 
-    NoFraud,
-    #[sea_orm(string_value = "BlockedAutomatically")] 
-    BlockedAutomatically,
-    #[sea_orm(string_value = "AccountTakeover")] 
-    AccountTakeover,
-    #[sea_orm(string_value = "NotCreditWorthy")] 
-    NotCreditWorthy,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter, DeriveActiveEnum)]
-#[sea_orm(rs_type = "String", db_type = "Text")]
-pub enum LabelSource {
-    #[sea_orm(string_value = "Manual")] 
-    Manual,
-    #[sea_orm(string_value = "Api")] 
-    Api,
-}
-
-// Feature infrastructure (used alongside the `features` entity)
-
-#[derive(Debug, Clone)]
-pub enum FeatureValue {
-    Int(i64),
-    Double(f64),
-    String(String),
-    Bool(bool),
-    DateTime(DateTime<Utc>),
-    IntList(Vec<i64>),
-    DoubleList(Vec<f64>),
-    StringList(Vec<String>),
-    BoolList(Vec<bool>),
-}
-
 impl Into<EvalValue> for FeatureValue {
     fn into(self) -> EvalValue {
         match self {
@@ -256,9 +218,9 @@ pub mod label {
     pub struct Model {
         #[sea_orm(primary_key)]
         pub id: i64,
-        pub fraud_level: super::FraudLevel,
+        pub fraud_level: FraudLevel,
         pub fraud_category: String,
-        pub label_source: super::LabelSource,
+        pub label_source: LabelSource,
         pub labeled_by: String,
         pub created_at: NaiveDateTime,
     }
@@ -320,11 +282,11 @@ pub mod transaction {
 }
 
 // Models
-pub mod model {
+pub mod scoring_model {
     use super::*;
 
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-    #[sea_orm(table_name = "models")]
+    #[sea_orm(table_name = "scoring_models")]
     pub struct Model {
         #[sea_orm(primary_key)]
         pub id: i64,
@@ -332,7 +294,7 @@ pub mod model {
         pub features_schema_version_major: i32,
         pub features_schema_version_minor: i32,
         pub version: String,
-        pub model_type: String,
+        pub model_type: super::ScoringModelType,
         pub created_at: NaiveDateTime,
     }
 
@@ -366,13 +328,13 @@ pub mod channel {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::model::Entity", from = "Column::ModelId", to = "super::model::Column::Id")]
+        #[sea_orm(belongs_to = "super::scoring_model::Entity", from = "Column::ModelId", to = "super::scoring_model::Column::Id")]
         Model,
         #[sea_orm(has_many = "super::scoring_event::Entity")]
         ScoringEvent,
     }
 
-    impl Related<super::model::Entity> for Entity { fn to() -> RelationDef { Relation::Model.def() } }
+    impl Related<super::scoring_model::Entity> for Entity { fn to() -> RelationDef { Relation::Model.def() } }
     impl Related<super::scoring_event::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringEvent.def() } }
 
     impl ActiveModelBehavior for ActiveModel {}
@@ -429,13 +391,13 @@ pub mod scoring_rule {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::model::Entity", from = "Column::ModelId", to = "super::model::Column::Id")]
+        #[sea_orm(belongs_to = "super::scoring_model::Entity", from = "Column::ModelId", to = "super::scoring_model::Column::Id")]
         Model,
         #[sea_orm(has_many = "super::triggered_rule::Entity")]
         TriggeredRule,
     }
 
-    impl Related<super::model::Entity> for Entity { fn to() -> RelationDef { Relation::Model.def() } }
+    impl Related<super::scoring_model::Entity> for Entity { fn to() -> RelationDef { Relation::Model.def() } }
     impl Related<super::triggered_rule::Entity> for Entity { fn to() -> RelationDef { Relation::TriggeredRule.def() } }
 
     impl ActiveModelBehavior for ActiveModel {}

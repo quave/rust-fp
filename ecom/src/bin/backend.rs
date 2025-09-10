@@ -12,13 +12,7 @@ use ecom::{
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("Starting backend...");
     let config = initialize_executable()?;
-    
-    // Create storage
     let web_storage = Arc::new(OrderStorage::new(&config.common.database_url).await?);
-    
-    // Create common storage
     let common_storage: Arc<dyn CommonStorage> = Arc::new(ProdCommonStorage::new(&config.common.database_url).await?);
-    
-    // Run with concrete types
     run_backend::<EcomOrder>(config.backend, web_storage, common_storage).await
 }

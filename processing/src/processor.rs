@@ -1,10 +1,10 @@
 use crate::{
     model::*,
-    queue::QueueService,
+    queue::{ProdQueue, QueueService},
     scorers::Scorer,
-    storage::{CommonStorage, ProcessibleStorage},
+    storage::{CommonStorage, ProcessibleStorage, ProdCommonStorage},
 };
-use common::config::ProcessorConfig;
+use common::config::{CommonConfig, ProcessorConfig};
 use tokio::time::sleep;
 #[cfg(not(test))]
 use tracing::{debug, info, trace, warn};
@@ -26,15 +26,14 @@ where
     P: Processible,
     S: Scorer,
 {
-    pub fn new(
-        config: ProcessorConfig,
+    pub fn new_raw(
+        config:    ProcessorConfig,
         scorer: S,
         common_storage: Arc<dyn CommonStorage>,
         processible_storage: Arc<dyn ProcessibleStorage<P>>,
         proc_queue: Arc<dyn QueueService>,
         recalc_queue: Arc<dyn QueueService>,
-    ) -> Self {
-        info!("Initializing new Processor");
+        ) -> Self {
         Self {
             config,
             scorer,
@@ -43,6 +42,40 @@ where
             proc_queue,
             recalc_queue,
         }
+    }
+
+    pub async fn new(
+        common_config: CommonConfig,
+        processing_config:    ProcessorConfig,
+        scorer: S,
+        processible_storage: Arc<dyn ProcessibleStorage<P>>,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        info!("Initializing new Processor");
+
+        let matcher_configs = if let Some(configs) = &processing_config.matcher_configs {
+            configs.clone()
+        } else {
+            std::collections::HashMap::new()
+        };
+        let common_storage = Arc::new(
+            if !matcher_configs.is_empty() {
+                ProdCommonStorage::with_configs(&common_config.database_url, matcher_configs).await?
+            } else {
+                ProdCommonStorage::new(&common_config.database_url).await?
+            }
+        );
+
+        let proc_queue = Arc::new(ProdQueue::new(&common_config.database_url).await?);
+        let recalc_queue = Arc::new(ProdQueue::new(&common_config.database_url).await?);
+    
+        Ok(Self {
+            config: processing_config,
+            scorer,
+            common_storage,
+            processible_storage,
+            proc_queue,
+            recalc_queue,
+        })
     }
 
     pub async fn start_processing_worker(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -86,7 +119,7 @@ where
 
         self.save_features(
             transaction_id, 
-            Some(&simple_features), 
+            &Some(&simple_features), 
             &graph_features
         ).await?;
 
@@ -124,7 +157,7 @@ where
         
         self.save_features(
             processible_id, 
-            None, 
+            &None, 
             &features
         ).await?;
         
@@ -200,7 +233,7 @@ where
     async fn save_features(
         &self, 
         transaction_id: ModelId,
-        simple_features: Option<&[Feature]>,
+        simple_features: &Option<&[Feature]>,
         graph_features: &[Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         debug!("Saving features for transaction {:?}", &transaction_id);

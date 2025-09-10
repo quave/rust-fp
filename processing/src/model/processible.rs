@@ -1,5 +1,6 @@
 use async_trait::async_trait;
-use crate::model::{ModelId, Feature, ConnectedTransaction, DirectConnection, MatchingField};
+use crate::model::{ModelId, ConnectedTransaction, DirectConnection, MatchingField};
+use crate::model::{Feature};
 
 #[async_trait]
 pub trait Processible: Send + Sync {

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use processing::model::*;
+use processing::{model::*, model::Feature};
 use serde::{Serialize, Deserialize};
 use crate::storage_model::{order, order_item, customer, billing_data};
 

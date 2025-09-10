@@ -535,7 +535,7 @@ mod sqlx_helpers {
 
     /// Create a test model and return its ID  
     pub async fn create_test_model(pool: &PgPool, name: &str) -> Result<i64, Box<dyn Error + Send + Sync>> {
-        let row = sqlx::query!("INSERT INTO models (name, features_schema_version_major, features_schema_version_minor) VALUES ($1, 1, 0) RETURNING id", name)
+        let row = sqlx::query!("INSERT INTO scoring_models (name, features_schema_version_major, features_schema_version_minor) VALUES ($1, 1, 0) RETURNING id", name)
             .fetch_one(pool).await?;
         Ok(row.id)
     }

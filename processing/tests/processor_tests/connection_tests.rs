@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
 use processing::model::{Processible, ConnectedTransaction, DirectConnection};
-use super::mocks::{TestTransaction, ConnectionTrackingStorage, MockProcessibleStorage, MockQueueService, create_high_value_scorer, create_empty_scorer};
+use super::super::mocks::{TestTransaction, ConnectionTrackingStorage, MockQueueService, create_mock_processible_storage, create_high_value_scorer, create_empty_scorer};
 
 #[tokio::test]
 async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -52,7 +52,7 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
     
     // Set up mocks
     let storage = ConnectionTrackingStorage::new(connected_transactions.clone(), direct_connections.clone());
-    let processible_storage = MockProcessibleStorage::new(transaction);
+    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next().returning(|| Ok(Some(1)));
@@ -62,7 +62,7 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
     let scorer = create_high_value_scorer();
     
     // Create processor
-    let processor = Processor::new(
+    let processor = Processor::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage.clone()),
@@ -130,12 +130,12 @@ async fn test_processor_connection_verification() -> Result<(), Box<dyn Error + 
     ];
     
     // Create a verification transaction that expects specific connections
-    let transaction = TestTransaction::connection_verifying(1, 1, connected_ids, direct_ids);
+    let transaction = TestTransaction::connection_verifying(1, connected_ids, direct_ids);
     let verification_flag = transaction.verification_passed().unwrap();
     
     // Set up mocks
     let storage = ConnectionTrackingStorage::new(connected_transactions, direct_connections);
-    let processible_storage = MockProcessibleStorage::new(transaction);
+    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next().returning(|| Ok(Some(1)));
@@ -145,7 +145,7 @@ async fn test_processor_connection_verification() -> Result<(), Box<dyn Error + 
     let scorer = create_empty_scorer();
     
     // Create processor
-    let processor = Processor::new(
+    let processor = Processor::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage.clone()),
@@ -248,7 +248,7 @@ async fn test_processor_empty_connections() -> Result<(), Box<dyn Error + Send +
     
     // Set up mocks with empty connections
     let storage = ConnectionTrackingStorage::new(Vec::new(), Vec::new());
-    let processible_storage = MockProcessibleStorage::new(transaction);
+    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next().returning(|| Ok(Some(1)));
@@ -258,7 +258,7 @@ async fn test_processor_empty_connections() -> Result<(), Box<dyn Error + Send +
     let scorer = create_high_value_scorer();
     
     // Create processor
-    let processor = Processor::new(
+    let processor = Processor::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage.clone()),
