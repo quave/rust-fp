@@ -1,13 +1,26 @@
-use crate::{model::*, model::Feature};
+use crate::model::{Feature, processible::{ColumnValueTrait, Filter}, *};
 use async_trait::async_trait;
 use std::error::Error;
 use crate::model::{Channel, ScoringEvent, TriggeredRule};
 
 #[async_trait]
 pub trait CommonStorage: Send + Sync {
-    async fn save_transaction(
+    async fn insert_transaction(
         &self,
+        payload_number: String,
+        payload: serde_json::Value,
+        schema_version: (i32, i32),
     ) -> Result<ModelId, Box<dyn Error + Send + Sync>>;
+
+    async fn get_transaction(
+        &self,
+        transaction_id: ModelId,
+    ) -> Result<Transaction, Box<dyn Error + Send + Sync>>;
+
+    async fn filter_transactions(
+        &self,
+        filters: &[Filter<Box<dyn ColumnValueTrait>>],
+    ) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>>;
 
     async fn mark_transaction_processed(
         &self,
@@ -69,13 +82,7 @@ pub trait CommonStorage: Send + Sync {
         &self,
         scoring_event_id: ModelId,
     ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>>;
-    
-    async fn update_transaction_label(
-        &self,
-        transaction_id: ModelId,
-        label_id: ModelId,
-    ) -> Result<(), Box<dyn Error + Send + Sync>>;
-    
+        
     async fn label_transactions(
         &self,
         transaction_ids: &[ModelId],

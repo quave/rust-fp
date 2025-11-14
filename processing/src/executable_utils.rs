@@ -1,6 +1,6 @@
 use async_graphql::http::GraphiQLSource;
 use clap::Parser;
-use std::{error::Error, fmt::Debug, sync::Arc};
+use std::{error::Error, fmt::Debug, marker::PhantomData, sync::Arc};
 use axum::{
     extract::Json, http::StatusCode, response::{self, IntoResponse, Response}, routing::{get, post}, Router
 };
@@ -10,12 +10,12 @@ use tower_http::{
     cors::{CorsLayer, Any},
 };
 use http::header;
-use common::config::{Config, ImporterConfig, BackendConfig};
+use common::config::{Config, BackendConfig};
 use crate::{
     importer::Importer,
-    model::{FraudLevel, Importable, ImportableSerde, LabelSource, ModelId, WebTransaction},
+    model::{FraudLevel, LabelSource, ModelId, Processible, ProcessibleSerde},
     queue::QueueService,
-    storage::{CommonStorage, ImportableStorage, WebStorage},
+    storage::{CommonStorage, ProdCommonStorage},
 };
 
 #[derive(Parser, Debug)]
@@ -64,17 +64,17 @@ pub fn initialize_executable() -> Result<Config, Box<dyn Error + Send + Sync>> {
     Ok(config)
 }
 
-pub async fn run_importer<I>(
-    config: ImporterConfig,
-    storage: Arc<dyn ImportableStorage<I>>,
+pub async fn run_importer<P>(
+    config: Config,
     queue: Arc<dyn QueueService>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-    I: ImportableSerde + Clone + 'static,
+    P: Processible + ProcessibleSerde,
 {
-    let importer = Importer::<I>::new(storage, queue);
+    let storage = Arc::new(ProdCommonStorage::<P>::new(&config.common.database_url).await?);
+    let importer = Importer::<P>::new(storage, queue);
     let app = Router::new()
-        .route("/import", post(import_transaction::<I>))
+        .route("/import", post(import_transaction::<P>))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
         .layer(
@@ -85,19 +85,19 @@ where
         )
         .with_state(importer);
 
-    tracing::info!("Starting importer service at {}", config.server_address);
-    let listener = tokio::net::TcpListener::bind(&config.server_address).await?;
+    tracing::info!("Starting importer service at {}", config.importer.server_address);
+    let listener = tokio::net::TcpListener::bind(&config.importer.server_address).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
 }
 
-pub async fn import_transaction<I>(
-    axum::extract::State(importer): axum::extract::State<Importer<I>>,
-    Json(transaction): Json<I>,
-) -> impl IntoResponse
+pub async fn import_transaction<P>(
+    axum::extract::State(importer): axum::extract::State<Importer<P>>,
+    Json(transaction): Json<P>,
+) -> Response
 where
-    I: Importable + Clone,
+    P: Processible + ProcessibleSerde + Clone,
 {
     match importer.import(transaction.clone()).await {
         Ok(id) => {
@@ -108,7 +108,7 @@ where
             // Enhanced error logging with transaction information
             tracing::error!(
                 error = %e,
-                transaction_type = std::any::type_name::<I>(),
+                transaction_type = std::any::type_name::<P>(),
                 "Failed to import transaction"
             );
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
@@ -124,25 +124,24 @@ async fn graphiql() -> impl IntoResponse {
     response::Html(GraphiQLSource::build().endpoint("/api/transactions/graphql").finish())
 }
 
-pub async fn run_backend<T>(
+pub async fn run_backend<P>(
     config: BackendConfig,
-    storage: Arc<dyn WebStorage<T>>,
     common_storage: Arc<dyn CommonStorage>,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-    T: WebTransaction + Send + Sync + Clone + 'static,
+    P: Processible + ProcessibleSerde + Send + Sync + Clone + 'static,
 {
+    let schema = crate::storage::graphql_schema::schema::<P>(common_storage.clone()).unwrap();
+
     let state = AppState {
-        web_storage: storage,
+        _phantom: PhantomData,
         common_storage,
     };
 
-    let schema = state.web_storage.get_seaography_schema();
-    
     let app = Router::new()
         .route("/api/transactions/graphql", get(graphiql).post_service(GraphQL::new(schema)))
         
-        .route("/api/transactions/label", post(label_transaction::<T>))
+        .route("/api/transactions/label", post(label_transaction::<P>))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
         .layer(
@@ -162,19 +161,21 @@ where
 
 // Move AppState outside the function so it's visible to handler functions
 #[derive(Clone)]
-pub struct AppState<T: WebTransaction + Send + Sync + 'static> {
-    web_storage: Arc<dyn WebStorage<T>>,
+pub struct AppState<T: Processible + Send + Sync + 'static> {
+    // web_storage: Arc<dyn WebStorage<T>>,
     common_storage: Arc<dyn CommonStorage>,
+    _phantom: PhantomData<T>,
 }
 
-impl<T: WebTransaction + Send + Sync + 'static> AppState<T> {
+impl<T: Processible + Send + Sync + 'static> AppState<T> {
     pub fn new(
-        web_storage: Arc<dyn WebStorage<T>>,
+        // web_storage: Arc<dyn WebStorage<T>>,
         common_storage: Arc<dyn CommonStorage>,
     ) -> Self {
         Self {
-            web_storage,
+            // web_storage,
             common_storage,
+            _phantom: PhantomData,
         }
     }
 }
@@ -188,8 +189,8 @@ pub struct LabelRequest {
     pub labeled_by: String,
 }
 
-pub async fn label_transaction<T: WebTransaction + Send + Sync>(
-    axum::extract::State(state): axum::extract::State<AppState<T>>,
+pub async fn label_transaction<P: Processible + Send + Sync>(
+    axum::extract::State(state): axum::extract::State<AppState<P>>,
     Json(label_request): Json<LabelRequest>,
 ) -> Response 
 {
@@ -222,3 +223,111 @@ pub async fn label_transaction<T: WebTransaction + Send + Sync>(
         }
     }
 }
+
+
+// Positioned {
+// pos: Pos(40:5),
+// node: Field(Positioned {
+//     pos: Pos(40:5),
+//     node: Field {
+//     alias: None,
+//     name: Positioned {
+//         pos: Pos(40:5),
+//         node: Name("order_number")
+//     },
+//     arguments: [],
+//     directives: [],
+//     selection_set: Positioned {
+//         pos: Pos(0:0),
+//         node: SelectionSet {
+//         items: []
+//         }
+//     }
+//     }
+// })
+// },
+// Positioned {
+// pos: Pos(41:5),
+// node: Field(Positioned {
+//     pos: Pos(41:5),
+//     node: Field {
+//     alias: None,
+//     name: Positioned {
+//         pos: Pos(41:5),
+//         node: Name("items")
+//     },
+//     arguments: [],
+//     directives: [],
+//     selection_set: Positioned {
+//         pos: Pos(41:11),
+//         node: SelectionSet {
+//         items: [
+//             Positioned {
+//             pos: Pos(42:7),
+//             node: Field(Positioned {
+//                 pos: Pos(42:7),
+//                 node: Field {
+//                 alias: None,
+//                 name: Positioned {
+//                     pos: Pos(42:7),
+//                     node: Name("category")
+//                 },
+//                 arguments: [],
+//                 directives: [],
+//                 selection_set: Positioned {
+//                     pos: Pos(0:0),
+//                     node: SelectionSet {
+//                     items: []
+//                     }
+//                 }
+//                 }
+//             })
+//             },
+//             Positioned {
+//             pos: Pos(43:7),
+//             node: Field(Positioned {
+//                 pos: Pos(43:7),
+//                 node: Field {
+//                 alias: None,
+//                 name: Positioned {
+//                     pos: Pos(43:7),
+//                     node: Name("name")
+//                 },
+//                 arguments: [],
+//                 directives: [],
+//                 selection_set: Positioned {
+//                     pos: Pos(0:0),
+//                     node: SelectionSet {
+//                     items: []
+//                     }
+//                 }
+//                 }
+//             })
+//             },
+//             Positioned {
+//             pos: Pos(44:7),
+//             node: Field(Positioned {
+//                 pos: Pos(44:7),
+//                 node: Field {
+//                 alias: None,
+//                 name: Positioned {
+//                     pos: Pos(44:7),
+//                     node: Name("price")
+//                 },
+//                 arguments: [],
+//                 directives: [],
+//                 selection_set: Positioned {
+//                     pos: Pos(0:0),
+//                     node: SelectionSet {
+//                     items: []
+//                     }
+//                 }
+//                 }
+//             })
+//             }
+//         ]
+//         }
+//     }
+//     }
+// })
+// }

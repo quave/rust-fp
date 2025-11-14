@@ -1,43 +1,43 @@
-use std::{error::Error, sync::Arc};
+use std::{error::Error, marker::PhantomData, sync::Arc};
 
 use crate::{
-    model::{Importable, ImportableSerde, ModelId},
+    model::{ModelId, Processible, ProcessibleSerde},
     queue::QueueService,
-    storage::ImportableStorage,
+    storage::CommonStorage,
 };
 
 #[derive(Clone)]
-pub struct Importer<I: Importable> {
-    importable_storage: Arc<dyn ImportableStorage<I>>,
+pub struct Importer<P: Processible + ProcessibleSerde> {
+    storage: Arc<dyn CommonStorage>,
     queue: Arc<dyn QueueService>,
+    _phantom: PhantomData<P>,
 }
 
-impl<I: Importable> Importer<I> {
+impl<P: Processible + ProcessibleSerde> Importer<P> {
     pub fn new(
-        importable_storage: Arc<dyn ImportableStorage<I>>,
+        storage: Arc<dyn CommonStorage>,
         queue: Arc<dyn QueueService>,
     ) -> Self {
         tracing::info!("Initializing new Importer");
         Self {
-            importable_storage,
+            storage,
             queue,
+            _phantom: PhantomData,
         }
     }
 
-    pub fn extract_model<IS: ImportableSerde + 'static>(
-        json: &str,
-    ) -> Result<Box<dyn Importable>, Box<dyn Error + Send + Sync>> {
-        let model: IS = serde_json::from_str(json)?;
-        Ok(Box::new(model))
-    }
-
-    pub async fn import(&self, importable: I) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+    pub async fn import(&self, processible: P) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
         tracing::debug!("Starting import process for new transaction");
 
+        let payload_number = processible.payload_number();
+        let payload = processible.as_json()?;
+        let schema_version = processible.schema_version();
+
         let id = self
-            .importable_storage
-            .save(&importable)
+            .storage
+            .insert_transaction(payload_number, payload, schema_version)
             .await?;
+
         self.queue.enqueue(id).await?;
         tracing::info!("Successfully queued importable {:?} for processing", id);
 

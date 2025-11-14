@@ -4,7 +4,9 @@ use std::sync::atomic::Ordering;
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
 use processing::model::{Processible, ConnectedTransaction, DirectConnection};
-use super::super::mocks::{TestTransaction, ConnectionTrackingStorage, MockQueueService, create_mock_processible_storage, create_high_value_scorer, create_empty_scorer};
+use crate::mocks::MockScorer;
+
+use super::super::mocks::{TestPayload, ConnectionTrackingStorage, MockQueueService, create_high_value_scorer, create_empty_scorer};
 
 #[tokio::test]
 async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -47,35 +49,30 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
         },
     ];
     
-    // Create a transaction for testing
-    let transaction = TestTransaction::high_value();
-    
     // Set up mocks
     let storage = ConnectionTrackingStorage::new(connected_transactions.clone(), direct_connections.clone());
-    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_fetch_next().returning(|_| Ok(vec!(1)));
     queue.expect_mark_processed().returning(|_| Ok(()));
     let queue = Arc::new(queue);
     
     let scorer = create_high_value_scorer();
     
     // Create processor
-    let processor = Processor::new_raw(
+    let processor = Processor::<TestPayload, MockScorer>::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage.clone()),
-        Arc::new(processible_storage),
         queue.clone(),
         queue,
     );
     
     // Process the transaction
-    let result = processor.process(1).await?;
+    let result = processor.process(1).await;
     
     // Verify the result
-    assert!(result.is_some());
+    assert!(result.is_ok());
     
     // Verify that connections were fetched
     assert!(storage.fetch_connected_called.load(Ordering::Relaxed));
@@ -86,7 +83,7 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
 }
 
 #[tokio::test]
-async fn test_processor_connection_verification() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn test_processor_connection_verification() {
     // Create specific connection data for verification
     let connected_ids = vec![100, 200];
     let direct_ids = vec![300, 400];
@@ -130,35 +127,33 @@ async fn test_processor_connection_verification() -> Result<(), Box<dyn Error + 
     ];
     
     // Create a verification transaction that expects specific connections
-    let transaction = TestTransaction::connection_verifying(1, connected_ids, direct_ids);
+    let transaction = TestPayload::connection_verifying(1, connected_ids, direct_ids);
     let verification_flag = transaction.verification_passed().unwrap();
     
     // Set up mocks
     let storage = ConnectionTrackingStorage::new(connected_transactions, direct_connections);
-    let processible_storage = create_mock_processible_storage(Some(transaction));
     
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_fetch_next().returning(|_| Ok(vec!(1)));
     queue.expect_mark_processed().returning(|_| Ok(()));
     let queue = Arc::new(queue);
     
     let scorer = create_empty_scorer();
     
     // Create processor
-    let processor = Processor::new_raw(
+    let processor = Processor::<TestPayload, MockScorer>::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage.clone()),
-        Arc::new(processible_storage),
         queue.clone(),
         queue,
     );
     
     // Process the transaction
-    let result = processor.process(1).await?;
+    let result = processor.process(1).await;
     
     // Verify the result
-    assert!(result.is_some());
+    assert!(result.is_ok());
     
     // Verify that connection verification passed
     assert!(verification_flag.load(Ordering::Relaxed), "Connection verification should have passed");
@@ -167,12 +162,10 @@ async fn test_processor_connection_verification() -> Result<(), Box<dyn Error + 
     assert!(storage.fetch_connected_called.load(Ordering::Relaxed));
     assert!(storage.fetch_direct_called.load(Ordering::Relaxed));
     assert!(storage.save_features_called.load(Ordering::Relaxed));
-    
-    Ok(())
 }
 
 #[tokio::test]
-async fn test_processor_connection_feature_extraction() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn test_processor_connection_feature_extraction() {
     // Create test connection data
     let connected_transactions = vec![
         ConnectedTransaction {
@@ -222,7 +215,7 @@ async fn test_processor_connection_feature_extraction() -> Result<(), Box<dyn Er
     ];
     
     // Test graph feature extraction with connections
-    let transaction = TestTransaction::high_value();
+    let transaction = TestPayload::high_value();
     let graph_features = transaction.extract_graph_features(&connected_transactions, &direct_connections);
     
     // Verify connection count features are present
@@ -237,46 +230,37 @@ async fn test_processor_connection_feature_extraction() -> Result<(), Box<dyn Er
     // Verify the counts match the test data
     // Note: We need to extract the actual values, but for this test we'll just verify presence
     assert!(graph_features.len() >= 7); // All features including connection counts
-    
-    Ok(())
 }
 
 #[tokio::test]
-async fn test_processor_empty_connections() -> Result<(), Box<dyn Error + Send + Sync>> {
-    // Test with no connections
-    let transaction = TestTransaction::high_value();
-    
+async fn test_processor_empty_connections() {
     // Set up mocks with empty connections
     let storage = ConnectionTrackingStorage::new(Vec::new(), Vec::new());
-    let processible_storage = create_mock_processible_storage(Some(transaction));
-    
+
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|| Ok(Some(1)));
+    queue.expect_fetch_next().returning(|_| Ok(vec!(1)));
     queue.expect_mark_processed().returning(|_| Ok(()));
     let queue = Arc::new(queue);
     
     let scorer = create_high_value_scorer();
     
     // Create processor
-    let processor = Processor::new_raw(
+    let processor = Processor::<TestPayload, MockScorer>::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage.clone()),
-        Arc::new(processible_storage),
         queue.clone(),
         queue,
     );
     
     // Process the transaction
-    let result = processor.process(1).await?;
+    let result = processor.process(1).await;
     
     // Verify the result
-    assert!(result.is_some());
+    assert!(result.is_ok());
     
     // Verify that connections were still fetched (even if empty)
     assert!(storage.fetch_connected_called.load(Ordering::Relaxed));
     assert!(storage.fetch_direct_called.load(Ordering::Relaxed));
     assert!(storage.save_features_called.load(Ordering::Relaxed));
-    
-    Ok(())
 } 

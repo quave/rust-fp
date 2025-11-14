@@ -1,10 +1,58 @@
 use processing::storage::CommonStorage;
+use sqlx::PgPool;
 use std::error::Error;
 use tracing::debug;
 
 use super::setup::*;
-use common::test_helpers::{create_test_transaction, truncate_processing_tables};
+use common::test_helpers::{truncate_tables, truncate_processing_tables, create_test_transaction};
 use serial_test::serial;
+
+/// Generic batch insert for transactions
+async fn create_test_transactions_batch(
+    pool: &PgPool, 
+    transaction_data: &[(i64, &str)]
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for (id, created_at) in transaction_data {
+        // Use raw SQL to avoid datetime type issues
+        let query = format!("INSERT INTO transactions (id, created_at) VALUES ($1, '{} 00:00:00')", created_at);
+        sqlx::query(&query)
+            .bind(id)
+            .execute(pool).await?;
+    }
+    Ok(())
+}
+
+/// Truncate connection test tables
+async fn truncate_connection_test_tables(pool: &PgPool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let tables = &["match_node_transactions", "match_node", "transactions"];
+    truncate_tables(pool, tables).await
+}
+
+/// Create a test match node and return its ID
+async fn create_test_match_node(pool: &PgPool, matcher: &str, value: &str, confidence: i32, importance: i32) -> Result<i64, Box<dyn Error + Send + Sync>> {
+    let row = sqlx::query!("INSERT INTO match_node (matcher, value, confidence, importance) VALUES ($1, $2, $3, $4) RETURNING id", matcher, value, confidence, importance)
+        .fetch_one(pool).await?;
+    Ok(row.id)
+}
+
+async fn create_match_nodes_batch(
+    pool: &PgPool, 
+    nodes: &[(i64, &str, &str, i32, i32)]
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for (id, matcher, value, confidence, importance) in nodes {
+        sqlx::query!(
+            "INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES ($1, $2, $3, $4, $5)",
+            id, matcher, value, confidence, importance
+        ).execute(pool).await?;
+    }
+    Ok(())
+}
+
+async fn link_transaction_to_match_node(pool: &PgPool, node_id: i64, transaction_id: i64) -> Result<(), Box<dyn Error + Send + Sync>> {
+    sqlx::query!("INSERT INTO match_node_transactions (node_id, transaction_id) VALUES ($1, $2)", node_id, transaction_id)
+        .execute(pool).await?;
+    Ok(())
+}
 
 #[tokio::test]
 #[serial]
@@ -158,7 +206,7 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
     assert_eq!(tx1.path_matchers.len(), 1, "Should have 1 path matcher for root node");
     
     // Clean up before next test
-    common::test_helpers::truncate_connection_test_tables(&pool).await?;
+    truncate_connection_test_tables(&pool).await?;
     
     // SECTION 2: Test max_depth parameter
     // Set up transactions in a chain
@@ -174,7 +222,7 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
         (9, "2024-01-09"),
         (10, "2024-01-10"),
     ];
-    common::test_helpers::create_test_transactions_batch(&pool, &transaction_data).await?;
+    create_test_transactions_batch(&pool, &transaction_data).await?;
     
     // Create match nodes for a chain
     let node_data = vec![
@@ -188,7 +236,7 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
         (8, "link.8-9", "chain8", 100, 0),
         (9, "link.9-10", "chain9", 100, 0),
     ];
-    common::test_helpers::create_match_nodes_batch(&pool, &node_data).await?;
+    create_match_nodes_batch(&pool, &node_data).await?;
     
     // Connect transactions in a chain (one by one to avoid conflicts)
     let connections = vec![
@@ -196,7 +244,7 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
         (5, 5), (5, 6), (6, 6), (6, 7), (7, 7), (7, 8), (8, 8), (8, 9), (9, 9), (9, 10)
     ];
     for (node_id, transaction_id) in connections {
-        common::test_helpers::link_transaction_to_match_node(&pool, node_id, transaction_id).await?;
+        link_transaction_to_match_node(&pool, node_id, transaction_id).await?;
     }
     
     // Test depth-limited query (max_depth=2)
@@ -230,19 +278,19 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     let tx3 = create_test_transaction(&pool).await?;
 
     // Setup matcher nodes
-    let email_node_id = common::test_helpers::create_test_match_node(
+    let email_node_id = create_test_match_node(
         &pool, "email", "test@example.com", 90, 80
     ).await?;
 
-    let phone_node_id = common::test_helpers::create_test_match_node(
+    let phone_node_id = create_test_match_node(
         &pool, "phone", "1234567890", 85, 75
     ).await?;
 
     // Connect transactions via match nodes using the correct node IDs
-    common::test_helpers::link_transaction_to_match_node(&pool, email_node_id, tx1).await?;
-    common::test_helpers::link_transaction_to_match_node(&pool, email_node_id, tx2).await?;
-    common::test_helpers::link_transaction_to_match_node(&pool, phone_node_id, tx1).await?;
-    common::test_helpers::link_transaction_to_match_node(&pool, phone_node_id, tx3).await?;
+    link_transaction_to_match_node(&pool, email_node_id, tx1).await?;
+    link_transaction_to_match_node(&pool, email_node_id, tx2).await?;
+    link_transaction_to_match_node(&pool, phone_node_id, tx1).await?;
+    link_transaction_to_match_node(&pool, phone_node_id, tx3).await?;
 
     // Get direct connections for tx1
     let connections = storage.get_direct_connections(tx1).await?;

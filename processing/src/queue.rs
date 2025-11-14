@@ -8,7 +8,7 @@ use crate::model::ModelId;
 // Queue service interface
 #[async_trait]
 pub trait QueueService: Send + Sync {
-    async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>>;
+    async fn fetch_next(&self, number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>>;
     async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
@@ -28,7 +28,7 @@ impl ProdQueue {
 impl QueueService for ProdQueue {
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("Enqueuing transaction to the db: {:?}", id);
-        sqlx::query("INSERT INTO processing_queue (processable_id) VALUES ($1)")
+        sqlx::query("INSERT INTO processing_queue (transaction_id) VALUES ($1)")
             .bind(&id)
             .execute(&self.pool)
             .await?;
@@ -36,28 +36,22 @@ impl QueueService for ProdQueue {
         Ok(())
     }
 
-    async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>> {
+    async fn fetch_next(&self, number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>> {
         let mut tx = self.pool.begin().await?;
 
-        let record = sqlx::query!(
+        sqlx::query_scalar!(
             r#"
-            SELECT id, processable_id
+            SELECT transaction_id
             FROM processing_queue
             WHERE processed_at IS NULL
             ORDER BY created_at ASC
             FOR UPDATE SKIP LOCKED
-            LIMIT 1
+            LIMIT $1
             "#
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        if let Some(record) = record {
-            tx.commit().await?;
-            Ok(Some(record.processable_id))
-        } else {
-            Ok(None)
-        }
+        , number as i64)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| e.into())
     }
 
     async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -65,7 +59,7 @@ impl QueueService for ProdQueue {
             r#"
             UPDATE processing_queue
             SET processed_at = NOW()
-            WHERE processable_id = $1
+            WHERE transaction_id = $1
             "#,
             id
         )
@@ -94,7 +88,7 @@ impl RecalcQueue {
 impl QueueService for RecalcQueue {
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("Enqueuing transaction to the db: {:?}", id);
-        sqlx::query("INSERT INTO recalculation_queue (processable_id) VALUES ($1)")
+        sqlx::query("INSERT INTO recalculation_queue (transaction_id) VALUES ($1)")
             .bind(&id)
             .execute(&self.pool)
             .await?;
@@ -102,28 +96,22 @@ impl QueueService for RecalcQueue {
         Ok(())
     }
 
-    async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>> {
+    async fn fetch_next(&self, number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>> {
         let mut tx = self.pool.begin().await?;
 
-        let record = sqlx::query!(
+        sqlx::query_scalar!(
             r#"
-            SELECT id, processable_id
+            SELECT transaction_id
             FROM recalculation_queue
             WHERE processed_at IS NULL
             ORDER BY created_at ASC
             FOR UPDATE SKIP LOCKED
-            LIMIT 1
+            LIMIT $1
             "#
-        )
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        if let Some(record) = record {
-            tx.commit().await?;
-            Ok(Some(record.processable_id))
-        } else {
-            Ok(None)
-        }
+        , number as i64)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|e| e.into())
     }
 
     async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -131,7 +119,7 @@ impl QueueService for RecalcQueue {
             r#"
             UPDATE recalculation_queue
             SET processed_at = NOW()
-            WHERE processable_id = $1
+            WHERE transaction_id = $1
             "#,
             id
         )

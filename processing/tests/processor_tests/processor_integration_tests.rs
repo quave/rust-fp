@@ -1,12 +1,11 @@
-use std::error::Error;
 use std::sync::Arc;
 use common::config::ProcessorConfig;
 use processing::processor::Processor;
 use processing::model::*;
-use super::super::mocks::{create_mock_common_storage, MockQueueService, MockScorer, TestTransaction, MockProcessibleStorage};
+use super::super::mocks::{create_mock_common_storage, MockQueueService, MockScorer, TestPayload};
 
 #[tokio::test]
-async fn test_processor_process() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn test_processor_process() {
     // Create test data
     let tx_id = 1;
     
@@ -25,51 +24,39 @@ async fn test_processor_process() -> Result<(), Box<dyn Error + Send + Sync>> {
     
     let storage = create_mock_common_storage(Some(tx_id), features);
     
-    // Create mockall-based processible storage
-    let mut processible_storage = MockProcessibleStorage::new();
-    processible_storage.expect_get_processible()
-        .with(mockall::predicate::eq(tx_id))
-        .returning(move |_| Ok(TestTransaction::new(tx_id, true)));
-    processible_storage.expect_set_transaction_id()
-        .with(mockall::predicate::eq(tx_id), mockall::predicate::eq(tx_id))
-        .returning(|_, _| Ok(()));
-    
     // Create mockall-based queue services
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next()
-        .returning(move || Ok(Some(tx_id)));
+        .returning(move |_| Ok(vec!(tx_id)));
     queue.expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
         .returning(|_| Ok(()));
     
     let mut failed_queue = MockQueueService::new();
     failed_queue.expect_fetch_next()
-        .returning(move || Ok(Some(tx_id)));
+        .returning(move |_| Ok(vec!(tx_id)));
     failed_queue.expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
         .returning(|_| Ok(()));
     
     // Create processor
-    let processor = Processor::new_raw(
+    let processor = Processor::<TestPayload, MockScorer>::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage),
-        Arc::new(processible_storage),
         Arc::new(queue),
         Arc::new(failed_queue),
     );
     
     // Process
-    let result = processor.process(tx_id).await?;
+    let result = processor.process(tx_id).await;
     
     // Verify result
-    assert!(result.is_some());
-    
-    Ok(())
+    assert!(result.is_ok());
 }
 
 #[tokio::test]
-async fn test_processor_process_with_nonexistent_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn test_processor_process_with_nonexistent_transaction() {
     let tx_id = 999;
     
     // Set up mocks - processible storage returns None
@@ -78,29 +65,22 @@ async fn test_processor_process_with_nonexistent_transaction() -> Result<(), Box
         .returning(|_| vec![]);
     let storage = create_mock_common_storage(Some(1), vec![]);
     
-    // Create mockall-based processible storage that returns an error
-    let mut processible_storage = MockProcessibleStorage::new();
-    processible_storage.expect_get_processible()
-        .with(mockall::predicate::eq(tx_id))
-        .returning(|_| Err("No processible found".into()));
-    
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next()
-        .returning(move || Ok(Some(tx_id)));
+        .returning(move |_| Ok(vec!(tx_id)));
     queue.expect_mark_processed()
         .returning(|_| Ok(()));
     
     let mut failed_queue = MockQueueService::new();
     failed_queue.expect_fetch_next()
-        .returning(move || Ok(Some(tx_id)));
+        .returning(move |_| Ok(vec!(tx_id)));
     failed_queue.expect_mark_processed()
         .returning(|_| Ok(()));
     
-    let processor = Processor::new_raw(
+    let processor = Processor::<TestPayload, MockScorer>::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage),
-        Arc::new(processible_storage),
         Arc::new(queue),
         Arc::new(failed_queue),
     );
@@ -108,19 +88,13 @@ async fn test_processor_process_with_nonexistent_transaction() -> Result<(), Box
     // Should handle the error gracefully and return None or an Err
     let result = processor.process(tx_id).await;
     // Either Ok(None) or Err - both are acceptable for nonexistent transactions
-    match result {
-        Ok(Some(_)) => panic!("Should not find a nonexistent transaction"),
-        Ok(None) => {}, // Acceptable - processor handled gracefully
-        Err(_) => {}, // Also acceptable - error bubbled up
-    }
-    
-    Ok(())
+    assert!(result.is_err());
 }
 
 #[tokio::test]
-async fn test_processor_with_custom_matching_config() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn test_processor_with_custom_matching_config(){
     let tx_id = 1;
-    let processible = TestTransaction::new(tx_id, true);
+    let processible = TestPayload::new(tx_id, true);
     let expected_features = processible.extract_simple_features();
     
     // Use simple custom mock
@@ -130,39 +104,28 @@ async fn test_processor_with_custom_matching_config() -> Result<(), Box<dyn Erro
     let storage = create_mock_common_storage(Some(tx_id), expected_features);
     
     // Create mockall-based processible storage
-    let mut processible_storage = MockProcessibleStorage::new();
-    processible_storage.expect_get_processible()
-        .with(mockall::predicate::eq(tx_id))
-        .returning(move |_| Ok(TestTransaction::new(tx_id, true)));
-    processible_storage.expect_set_transaction_id()
-        .with(mockall::predicate::eq(tx_id), mockall::predicate::eq(tx_id))
-        .returning(|_, _| Ok(()));
-    
     let mut queue = MockQueueService::new();
     queue.expect_fetch_next()
-        .returning(move || Ok(Some(tx_id)));
+        .returning(move |_| Ok(vec!(tx_id)));
     queue.expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
         .returning(|_| Ok(()));
     
     let mut failed_queue = MockQueueService::new();
     failed_queue.expect_fetch_next()
-        .returning(move || Ok(Some(tx_id)));
+        .returning(move |_| Ok(vec!(tx_id)));
     failed_queue.expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
         .returning(|_| Ok(()));
     
-    let processor = Processor::new_raw(
+    let processor = Processor::<TestPayload, MockScorer>::new_raw(
         ProcessorConfig::default(),
         scorer,
         Arc::new(storage),
-        Arc::new(processible_storage),
         Arc::new(queue),
         Arc::new(failed_queue),
     );
     
-    let result = processor.process(tx_id).await?;
-    assert!(result.is_some());
-    
-    Ok(())
+    let result = processor.process(tx_id).await;
+    assert!(result.is_ok());
 } 

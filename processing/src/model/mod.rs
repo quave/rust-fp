@@ -7,24 +7,22 @@ pub type ModelId = i64;
 
 // Submodules for trait definitions
 pub mod processible;
-pub mod importable;
-pub mod importable_serde;
-pub mod web_transaction;
 pub mod sea_orm_storage_model;
 
 // Re-export traits for downstream crates
 pub use processible::Processible;
-pub use importable::Importable;
-pub use importable_serde::ImportableSerde;
-pub use web_transaction::WebTransaction;
+pub use processible::ProcessibleSerde;
+
 pub use sea_orm_storage_model::*;
 pub use sea_orm_storage_model::triggered_rule::Model as TriggeredRule;
 pub use sea_orm_storage_model::channel::Model as Channel;
 pub use sea_orm_storage_model::scoring_model::Model as ScoringModel;
 pub use sea_orm_storage_model::scoring_event::Model as ScoringEvent;
+pub use sea_orm_storage_model::transaction::Model as Transaction;
 
 // Re-export MatcherConfig
 pub type MatcherConfig = (i32, i32); // (confidence, importance) 
+pub type SchemaVersion = (i32, i32);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatchingField {

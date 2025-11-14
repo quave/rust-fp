@@ -1,25 +1,22 @@
 use async_trait::async_trait;
-use processing::{model::*, model::Feature};
-use serde::{Serialize, Deserialize};
-use crate::storage_model::{order, order_item, customer, billing_data};
+use processing::model::{ConnectedTransaction, DirectConnection, Feature, FeatureValue, MatchingField, Processible};
 
-/// Combined Order model with related data using SeaORM entities directly
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EcomOrder {
-    pub order: order::Model,
-    pub items: Vec<order_item::Model>,
-    pub customer: customer::Model,
-    pub billing: billing_data::Model,
-}
-
-impl WebTransaction for EcomOrder {
-    fn id(&self) -> ModelId {
-        self.order.id
-    }
-}
+use crate::model::{EcomOrder};
 
 #[async_trait]
 impl Processible for EcomOrder {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn payload_number(&self) -> String {
+        self.order_number.clone()
+    }
+
+    fn schema_version(&self) -> (i32, i32) {
+        (1, 0)
+    }
+
     fn extract_simple_features(
         &self,
     ) -> Vec<Feature> {
@@ -49,7 +46,7 @@ impl Processible for EcomOrder {
         features.push(Feature {
             name: "created_at".to_string(),
             value: Box::new(FeatureValue::DateTime(
-                chrono::DateTime::from_timestamp(self.order.created_at.and_utc().timestamp(), 0)
+                chrono::DateTime::from_timestamp(self.created_at.timestamp(), 0)
                     .unwrap_or_else(|| chrono::Utc::now())
             )),
         });
@@ -82,10 +79,6 @@ impl Processible for EcomOrder {
         });
 
         features
-    }
-
-    fn id(&self) -> ModelId {
-        self.order.id
     }
 
     fn extract_matching_fields(&self) -> Vec<MatchingField> {

@@ -3,17 +3,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::Utc;
 use async_trait::async_trait;
-use seaography::Builder;
-use sea_orm::DatabaseConnection;
+use processing::model::processible::{ColumnFilter, ColumnValueTrait};
+use serde::{Serialize, Deserialize};
 use processing::{
     model::*,
-    storage::{CommonStorage, WebStorage, ProcessibleStorage}, 
+    storage::{CommonStorage}, 
     queue::QueueService,
 };
 
 // Test transaction struct for processor tests
-#[derive(Debug, Clone)]
-pub struct TestTransaction {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestPayload {
     pub id: ModelId,
     pub is_high_value: bool,
     pub created_at: chrono::DateTime<Utc>,
@@ -23,7 +23,7 @@ pub struct TestTransaction {
     pub verification_passed: Option<Arc<AtomicBool>>,
 }
 
-impl TestTransaction {
+impl TestPayload {
     pub fn new(id: ModelId, is_high_value: bool) -> Self {
         Self {
             id,
@@ -64,8 +64,34 @@ impl TestTransaction {
     }
 }
 
+impl ProcessibleSerde for TestPayload {
+    fn as_json(&self) -> Result<serde_json::Value, Box<dyn Error + Send + Sync>> {
+        Ok(serde_json::to_value(self)?)
+    }
+
+    fn from_json(json: serde_json::Value) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        Ok(serde_json::from_value(json)?)
+    }
+
+    fn list_column_fields() -> Vec<ColumnFilter<Self>> {
+        vec![]
+    }
+}
+
 #[async_trait]
-impl Processible for TestTransaction {
+impl Processible for TestPayload {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn payload_number(&self) -> String {
+        "test_payload_number".to_string()
+    }
+
+    fn schema_version(&self) -> (i32, i32) {
+        (1, 0)
+    }
+
     fn extract_simple_features(&self) -> Vec<Feature> {
         let mut features = Vec::new();
         
@@ -160,10 +186,6 @@ impl Processible for TestTransaction {
         features
     }
 
-    fn id(&self) -> ModelId {
-        self.id
-    }
-
     fn extract_matching_fields(&self) -> Vec<MatchingField> {
         if self.expected_connected_ids.is_some() {
             // Connection verification transaction
@@ -204,7 +226,14 @@ mock! {
 
     #[async_trait]
     impl CommonStorage for CommonStorage {
-        async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>>;
+        async fn insert_transaction(
+            &self,
+            payload_number: String,
+            payload: serde_json::Value,
+            schema_version: (i32, i32),
+        ) -> Result<ModelId, Box<dyn Error + Send + Sync>>;
+        async fn get_transaction(&self, transaction_id: ModelId) -> Result<Transaction, Box<dyn Error + Send + Sync>>;
+        async fn filter_transactions(&self, filters: &[processible::Filter<Box<dyn ColumnValueTrait>>]) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>>;
         async fn mark_transaction_processed(&self, transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
         async fn save_features<'a>(
             &self,
@@ -262,12 +291,6 @@ mock! {
             _scoring_event_id: ModelId,
         ) -> Result<Vec<TriggeredRule>, Box<dyn Error + Send + Sync>>;
     
-        async fn update_transaction_label(
-            &self,
-            _transaction_id: ModelId,
-            _label_id: ModelId,
-        ) -> Result<(), Box<dyn Error + Send + Sync>>;
-    
         async fn label_transactions(
             &self, 
             _transaction_ids: &[ModelId], 
@@ -283,7 +306,6 @@ pub fn create_mock_common_storage(tx_id: Option<i64>, features: Vec<Feature>) ->
     let mut mock = MockCommonStorage::new();
     let default_tx_id = 1;
     
-    mock.expect_save_transaction().returning(move|| Ok(tx_id.unwrap_or(default_tx_id)));
     mock.expect_mark_transaction_processed().returning(|_| Ok(()));
     mock.expect_save_features().returning(|_, _, _| Ok(()));
     mock.expect_get_features().returning( move |arg_tx_id|  {
@@ -297,59 +319,10 @@ pub fn create_mock_common_storage(tx_id: Option<i64>, features: Vec<Feature>) ->
     mock.expect_get_channels().returning(|_| Ok(vec![]));
     mock.expect_get_scoring_events().returning(|_| Ok(vec![]));
     mock.expect_get_triggered_rules().returning(|_| Ok(vec![]));
-    mock.expect_update_transaction_label().returning(|_, _| Ok(()));
     
     mock
 }
 
-// Import and re-export centralized mocks for use in API tests
-// Simple local mock implementations - TODO: Move to common when centralized
-#[derive(Clone, serde::Serialize)]
-pub struct MockWebTransaction {
-    pub id: ModelId,
-}
-
-impl MockWebTransaction {
-    pub fn new(id: ModelId) -> Self {
-        Self { id }
-    }
-    
-    pub fn get_id(&self) -> ModelId {
-        self.id
-    }
-}
-
-// Implement the required traits for MockWebTransaction
-#[async_trait]
-impl WebTransaction for MockWebTransaction {
-    fn id(&self) -> ModelId {
-        self.get_id()
-    }
-}
-
-
-
-mock!{
-    pub WebStorage {}
-
-    #[async_trait]
-    impl WebStorage<MockWebTransaction> for WebStorage {
-        fn register_seaography_entities(&self, builder: Builder) -> Builder;
-        fn get_connection(&self) -> &DatabaseConnection;
-        async fn get_web_transaction(&self, transaction_id: ModelId) -> Result<MockWebTransaction, Box<dyn Error + Send + Sync>>;
-    }
-}
-
-pub fn create_mock_web_storage(transactions: Vec<MockWebTransaction>) -> MockWebStorage {
-    let mut mock_web_storage = MockWebStorage::new();
-    mock_web_storage.expect_get_web_transaction().returning(move |transaction_id| {
-        transactions.iter()
-            .find(|t| t.id == transaction_id)
-            .cloned()
-            .ok_or_else(|| format!("Transaction {} not found", transaction_id).into())
-    });
-    mock_web_storage
-}
 
 // Connection tracking storage for testing
 #[derive(Debug, Clone)]
@@ -375,7 +348,27 @@ impl ConnectionTrackingStorage {
 
 #[async_trait]
 impl CommonStorage for ConnectionTrackingStorage {
-    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> { Ok(1) }
+    async fn filter_transactions(&self, _filters: &[processible::Filter<Box<dyn ColumnValueTrait>>]) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>> { Ok(vec![]) }
+    async fn insert_transaction(
+        &self,
+        _payload_number: String,
+        _payload: serde_json::Value,
+        _schema_version: (i32, i32),
+    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> { Ok(1) }
+    async fn get_transaction(&self, transaction_id: ModelId) -> Result<Transaction, Box<dyn Error + Send + Sync>> { Ok(
+        Transaction { 
+            id: transaction_id, 
+            payload_number: "test_payload_number".to_string(), 
+            payload: serde_json::Value::Null, 
+            schema_version_major: 1, 
+            schema_version_minor: 0, 
+            label_id: None, 
+            comment: None, 
+            last_scoring_date: None, 
+            processing_complete: false, 
+            created_at: chrono::Utc::now().naive_utc()
+        }
+    )}
     async fn mark_transaction_processed(&self, _transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> { Ok(()) }
 
     async fn save_features<'a>(
@@ -465,41 +458,9 @@ impl CommonStorage for ConnectionTrackingStorage {
         Ok(Vec::new())
     }
 
-    // removed save_label/get_label from trait
-
-    async fn update_transaction_label(
-        &self,
-        _transaction_id: ModelId,
-        _label_id: ModelId,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        Ok(())
-    }
-
     async fn label_transactions(&self, _transaction_ids: &[ModelId], _fraud_level: FraudLevel, _fraud_category: String, _label_source: LabelSource, _labeled_by: String) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
-}
-
-// Mock ProcessibleStorage using mockall - much cleaner than custom adapter!
-mock! {
-    pub ProcessibleStorage {}
-
-    #[async_trait]
-    impl ProcessibleStorage<TestTransaction> for ProcessibleStorage {
-        async fn get_processible(&self, transaction_id: i64) -> Result<TestTransaction, Box<dyn std::error::Error + Send + Sync>>;
-        async fn set_transaction_id(&self, processible_id: i64, transaction_id: i64) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    }
-}
-
-pub fn create_mock_processible_storage(transaction: Option<TestTransaction>) -> MockProcessibleStorage {
-    let mut mock_processible_storage = MockProcessibleStorage::new();
-        mock_processible_storage.expect_get_processible().returning( move |_| match transaction.clone() {
-            Some(tx) => Ok(tx.clone()),
-            None => Err("Transaction not found".into()),
-        }
-    );
-    mock_processible_storage.expect_set_transaction_id().returning(|_, _| Ok(()));
-    mock_processible_storage
 }
 
 // Direct MockQueueService implementation using mockall - OPTIMAL FIRST approach
@@ -510,7 +471,7 @@ mock! {
 
     #[async_trait]
     impl QueueService for QueueService {
-        async fn fetch_next(&self) -> Result<Option<ModelId>, Box<dyn Error + Send + Sync>>;
+        async fn fetch_next(&self, _number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>>;
         async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
         async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
     }

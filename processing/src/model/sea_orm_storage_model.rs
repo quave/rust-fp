@@ -247,6 +247,10 @@ pub mod transaction {
     pub struct Model {
         #[sea_orm(primary_key)]
         pub id: i64,
+        pub payload_number: String,
+        pub payload: serde_json::Value,
+        pub schema_version_major: i32,
+        pub schema_version_minor: i32,
         pub label_id: Option<i64>,
         pub comment: Option<String>,
         pub last_scoring_date: Option<NaiveDateTime>,

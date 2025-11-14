@@ -2,7 +2,7 @@ use crate::{
     model::*,
     queue::{ProdQueue, QueueService},
     scorers::Scorer,
-    storage::{CommonStorage, ProcessibleStorage, ProdCommonStorage},
+    storage::{CommonStorage, ProdCommonStorage},
 };
 use common::config::{CommonConfig, ProcessorConfig};
 use tokio::time::sleep;
@@ -10,37 +10,33 @@ use tokio::time::sleep;
 use tracing::{debug, info, trace, warn};
 #[cfg(test)]
 use {println as debug, println as info, println as trace, println as warn};
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{error::Error, marker::PhantomData, sync::Arc, time::Duration};
 
-pub struct Processor<P: Processible, S: Scorer> {
+pub struct Processor<P: Processible + ProcessibleSerde, S: Scorer> {
     config: ProcessorConfig,
     scorer: S,
-    common_storage: Arc<dyn CommonStorage>,
-    processible_storage: Arc<dyn ProcessibleStorage<P>>,
+    storage: Arc<dyn CommonStorage>,
     proc_queue: Arc<dyn QueueService>,
     recalc_queue: Arc<dyn QueueService>,
+    _phantom: PhantomData<P>,
 }
 
-impl<P, S> Processor<P, S>
-where
-    P: Processible,
-    S: Scorer,
+impl<P: Processible + ProcessibleSerde + 'static, S: Scorer> Processor<P, S>
 {
     pub fn new_raw(
-        config:    ProcessorConfig,
+        config: ProcessorConfig,
         scorer: S,
-        common_storage: Arc<dyn CommonStorage>,
-        processible_storage: Arc<dyn ProcessibleStorage<P>>,
+        storage: Arc<dyn CommonStorage>,
         proc_queue: Arc<dyn QueueService>,
         recalc_queue: Arc<dyn QueueService>,
         ) -> Self {
         Self {
             config,
             scorer,
-            common_storage,
-            processible_storage,
+            storage,
             proc_queue,
             recalc_queue,
+            _phantom: PhantomData,
         }
     }
 
@@ -48,7 +44,6 @@ where
         common_config: CommonConfig,
         processing_config:    ProcessorConfig,
         scorer: S,
-        processible_storage: Arc<dyn ProcessibleStorage<P>>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         info!("Initializing new Processor");
 
@@ -57,13 +52,13 @@ where
         } else {
             std::collections::HashMap::new()
         };
-        let common_storage = Arc::new(
+        let common_storage =
             if !matcher_configs.is_empty() {
-                ProdCommonStorage::with_configs(&common_config.database_url, matcher_configs).await?
+                ProdCommonStorage::<P>::with_configs(&common_config.database_url, matcher_configs).await?
             } else {
-                ProdCommonStorage::new(&common_config.database_url).await?
-            }
-        );
+                ProdCommonStorage::<P>::new(&common_config.database_url).await?
+            };
+        
 
         let proc_queue = Arc::new(ProdQueue::new(&common_config.database_url).await?);
         let recalc_queue = Arc::new(ProdQueue::new(&common_config.database_url).await?);
@@ -71,10 +66,10 @@ where
         Ok(Self {
             config: processing_config,
             scorer,
-            common_storage,
-            processible_storage,
+            storage: Arc::new(common_storage),
             proc_queue,
             recalc_queue,
+            _phantom: PhantomData,
         })
     }
 
@@ -82,10 +77,10 @@ where
         info!("Starting processing worker");
         
         loop {
-            if let Some(transaction_id) = self.proc_queue.fetch_next().await? {
-                self.process(transaction_id).await?;
-            } else if let Some(transaction_id) = self.recalc_queue.fetch_next().await? {
-                self.recalculate(transaction_id).await?;
+            if let Some(transaction_id) = self.proc_queue.fetch_next(1).await?.first() {
+                self.process(*transaction_id).await?;
+            } else if let Some(transaction_id) = self.recalc_queue.fetch_next(1).await?.first() {
+                self.recalculate(*transaction_id).await?;
             } else {
                 trace!("No transactions in queues");
                 sleep(Duration::from_millis(self.config.sleep_ms)).await;
@@ -93,30 +88,40 @@ where
         }
     }
 
-    pub async fn process(&self, processible_id: ModelId) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
-        info!("Processing model with ID: {:?}", &processible_id);
+    pub async fn process(&self, transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
+        info!("Processing: Starting, transaction id: {:?}", &transaction_id);
 
-        let processible = self
-            .processible_storage
-            .get_processible(processible_id)
+        let transaction = self
+            .storage
+            .get_transaction(transaction_id)
             .await?;
 
-        let transaction_id = self.common_storage.save_transaction().await?;
-        self.processible_storage.set_transaction_id(processible_id, transaction_id).await?;
+        let processible: P = P::from_json(transaction.payload)
+        .expect("Processing: Failed to deserialize transaction during processing");
 
-        self.extract_and_save_matching_fields(&processible, transaction_id).await?;
-        
+        debug!("Processing: Extracting matching fields for transaction {:?}", &transaction_id);
+        let matching_fields = processible.extract_matching_fields();
+        self
+            .storage
+            .save_matching_fields(
+                transaction_id, 
+                &matching_fields
+            )
+            .await
+            .expect("Processing: Failed to save matching fields during processing");
+
         // Fetch connected transactions and direct connections
         let connected_transactions = self.fetch_connected_transactions(transaction_id).await?;
         let direct_connections = self.fetch_direct_connections(transaction_id).await?;
         
-        debug!("Extracting features for processible {:?}, transaction {:?}", &processible_id, &transaction_id);
+        debug!("Extracting features for processible {:?}, transaction {:?}", &transaction_id, &transaction_id);
         let simple_features = processible.extract_simple_features();
         let graph_features = processible.extract_graph_features(
             &connected_transactions,
             &direct_connections
         );
 
+        debug!("Processing: Extracting matching fields for transaction {:?}", &transaction_id);
         self.save_features(
             transaction_id, 
             &Some(&simple_features), 
@@ -125,49 +130,52 @@ where
 
         let features = [simple_features, graph_features].concat();
         
-        self.score_and_save_results( processible_id, features).await?;
+        self.score_and_save_results( transaction_id, features).await?;
 
-        self.common_storage.mark_transaction_processed(transaction_id).await?;
+        debug!("Processing: Extracting matching fields for transaction {:?}", &transaction_id);
+        self.storage.mark_transaction_processed(transaction_id).await?;
 
         // Only mark as processed if successful
-        self.proc_queue.mark_processed(processible_id).await?;
+        self.proc_queue.mark_processed(transaction_id).await?;
 
-        Ok(Some(processible))
+        Ok(())
     }
 
-    pub async fn recalculate(&self, processible_id: ModelId) -> Result<Option<P>, Box<dyn Error + Send + Sync>> {
-        trace!("Recalculating processible with ID: {:?}", &processible_id);
+    pub async fn recalculate(&self, transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
+        debug!("Recalculating transaction with id: {:?}", &transaction_id);
 
-        let processible = self
-            .processible_storage
-            .get_processible(processible_id)
+        let transaction = self
+            .storage
+            .get_transaction(transaction_id)
             .await?;
 
+        let processible: P = P::from_json(transaction.payload)
+            .expect("Failed to deserialize transaction during recalculation");
+
         // Fetch connected transactions and direct connections
-        let connected_transactions = self.fetch_connected_transactions(processible_id).await?;
-        let direct_connections = self.fetch_direct_connections(processible_id).await?;
+        let connected_transactions = self.fetch_connected_transactions(transaction_id).await?;
+        let direct_connections = self.fetch_direct_connections(transaction_id).await?;
         
-        debug!("Extracting features for transaction {:?} in recalculation", processible_id);
+        debug!("Extracting features for transaction {:?} in recalculation", transaction_id);
         let features = processible.extract_graph_features(
             &connected_transactions,
             &direct_connections
         );
 
-        debug!("Saving features for transaction {:?}", &processible_id);
+        debug!("Saving features for transaction {:?}", &transaction_id);
         
         self.save_features(
-            processible_id, 
+            transaction_id, 
             &None, 
             &features
         ).await?;
         
-        self.score_and_save_results(processible_id, features).await?;
+        self.score_and_save_results(transaction_id, features).await?;
 
         // Only mark as processed if successful
-        self.recalc_queue.mark_processed(processible_id).await?;
+        self.recalc_queue.mark_processed(transaction_id).await?;
 
-        Ok(Some(processible))
-    
+        Ok(())
     }
 
     async fn fetch_connected_transactions(
@@ -176,17 +184,16 @@ where
     ) -> Result<Vec<ConnectedTransaction>, Box<dyn Error + Send + Sync>> {
         debug!("Fetching connected transactions for {:?}", &transaction_id);
         // Default options: max_depth=3, limit_count=100, no date filters, min_confidence=50
-        let connected_transactions = self.common_storage
+        let connected_transactions = self.storage
             .find_connected_transactions(
                 transaction_id,
                 Some(3),     // max_depth
-                Some(100),   // limit_count
+                Some(10000),   // limit_count
                 None,        // min_created_at
                 None,        // max_created_at
                 Some(50)     // min_confidence
             )
             .await?;
-        
         info!("Found {} connected transactions", connected_transactions.len());
         Ok(connected_transactions)
     }
@@ -196,38 +203,12 @@ where
         transaction_id: i64
     ) -> Result<Vec<DirectConnection>, Box<dyn Error + Send + Sync>> {
         debug!("Fetching direct connections for {:?}", &transaction_id);
-        let direct_connections = self.common_storage
+        let direct_connections = self.storage
             .get_direct_connections(transaction_id)
             .await?;
         
         info!("Found {} direct connections", direct_connections.len());
         Ok(direct_connections)
-    }
-
-    async fn extract_and_save_matching_fields(
-        &self, 
-        processible: &P, 
-        transaction_id: i64
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        debug!("Extracting matching fields for transaction {:?}", &transaction_id);
-        let matching_fields = processible.extract_matching_fields();
-        
-        if !matching_fields.is_empty() {
-            if let Err(e) = self
-                .common_storage
-                .save_matching_fields(
-                    transaction_id, 
-                    &matching_fields
-                )
-                .await
-            {
-                warn!("Failed to save matching fields for {}: {}", transaction_id, e);
-                return Err(e);
-            }
-            info!("Extracted and saved {} matching fields", matching_fields.len());
-        }
-        
-        Ok(())
     }
 
     async fn save_features(
@@ -239,7 +220,7 @@ where
         debug!("Saving features for transaction {:?}", &transaction_id);
         
         if let Err(e) = self
-            .common_storage
+            .storage
             .save_features(transaction_id, simple_features, graph_features)
             .await
         {
@@ -276,7 +257,7 @@ where
         }).collect();
         
         if let Err(e) = self
-            .common_storage
+            .storage
             .save_scores(transaction_id, default_channel_id, total_score, &triggered_rules)
             .await
         {

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use processing::{
-    model::{FeatureValue, Feature},
-    scorers::{ExpressionBasedScorer, Scorer},
+    model::{Feature, FeatureValue},
+    scorers::{ExpressionBasedScorer, ExpressionRule, Scorer},
 };
 
 #[tokio::test]
@@ -16,7 +16,11 @@ async fn test_int_feature() {
 
     // Create scorer with expressions that produce boolean results
     let expressions = vec![
-        ("Transaction Count Score".to_string(), "transaction_count > 5".to_string()),
+        ExpressionRule {
+            name: "Transaction Count Score".to_string(),
+            expression: "transaction_count > 5".to_string(),
+            score: 100,
+        },
     ];
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
@@ -41,7 +45,11 @@ async fn test_double_feature() {
 
     // Create scorer with expressions that produce boolean results
     let expressions = vec![
-        ("High Amount Score".to_string(), "amount > 100.0".to_string()),
+        ExpressionRule {
+            name: "High Amount Score".to_string(),
+            expression: "amount > 100.0".to_string(),
+            score: 100,
+        },
     ];
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
@@ -68,7 +76,11 @@ async fn test_bool_feature() {
 
     // Create scorer with expressions - just use the boolean directly
     let expressions = vec![
-        ("Risk Score".to_string(), "is_high_risk".to_string()),
+        ExpressionRule {
+            name: "Risk Score".to_string(),
+            expression: "is_high_risk".to_string(),
+            score: 100,
+        },
     ];
     println!("Using expression: is_high_risk");
     
@@ -97,7 +109,11 @@ async fn test_string_feature() {
     // Create scorer with expressions
     let expressions = vec![
         // Simple string equality
-        ("Country Risk Score".to_string(), "country == \"US\"".to_string()),
+        ExpressionRule {
+            name: "Country Risk Score".to_string(),
+            expression: "country == \"US\"".to_string(),
+            score: 100,
+        },
     ];
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
@@ -140,10 +156,18 @@ async fn test_datetime_feature() {
     // Create scorer with expressions - all boolean results
     let expressions = vec![
         // Simple boolean comparison
-        ("Date Age Score".to_string(), "recent_date > created_at".to_string()),
+        ExpressionRule {
+            name: "Date Age Score".to_string(),
+            expression: "recent_date > created_at".to_string(),
+            score: 100,
+        },
         
         // Boolean expression using a fixed comparison
-        ("Recent Enough".to_string(), "recent_date > 1600000000000".to_string()), // Timestamp comparison
+        ExpressionRule {
+            name: "Recent Enough".to_string(),
+            expression: "recent_date > 1600000000000".to_string(),
+            score: 100,
+        }, // Timestamp comparison
     ];
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
@@ -187,10 +211,26 @@ async fn test_array_features() {
     // Create scorer with expressions - all boolean results
     let expressions = vec![
         // Test array lengths with boolean comparisons
-        ("Many Purchases".to_string(), "len(purchase_amounts) > 3".to_string()),
-        ("Few Items".to_string(), "len(item_counts) < 5".to_string()),
-        ("Multiple Categories".to_string(), "len(categories) >= 3".to_string()),
-        ("Has Flags".to_string(), "len(high_value_flags) > 0".to_string()),
+        ExpressionRule {
+            name: "Many Purchases".to_string(),
+            expression: "len(purchase_amounts) > 3".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Few Items".to_string(),
+            expression: "len(item_counts) < 5".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Multiple Categories".to_string(),
+            expression: "len(categories) >= 3".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Has Flags".to_string(),
+            expression: "len(high_value_flags) > 0".to_string(),
+            score: 100,
+        },
     ];
     
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
@@ -240,10 +280,26 @@ async fn test_combined_features() {
     // Create scorer with expressions that all output boolean values
     let expressions = vec![
         // All expressions produce boolean results
-        ("High Amount".to_string(), "total_amount > 500.0".to_string()),
-        ("Multiple Transactions".to_string(), "transaction_count >= 5".to_string()),
-        ("New Customer".to_string(), "is_new_customer".to_string()),
-        ("Credit Card Used".to_string(), "payment_method == \"credit_card\"".to_string()),
+        ExpressionRule {
+            name: "High Amount".to_string(),
+            expression: "total_amount > 500.0".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Multiple Transactions".to_string(),
+            expression: "transaction_count >= 5".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "New Customer".to_string(),
+            expression: "is_new_customer".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Credit Card Used".to_string(),
+            expression: "payment_method == \"credit_card\"".to_string(),
+            score: 100,
+        },
     ];
     
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
@@ -281,12 +337,28 @@ async fn test_invalid_expressions() {
     // Create scorer with expressions - all boolean or invalid
     let expressions = vec![
         // Valid boolean expression
-        ("Valid Score".to_string(), "amount > 50.0".to_string()),
+        ExpressionRule {
+            name: "Valid Score".to_string(),
+            expression: "amount > 50.0".to_string(),
+            score: 100,
+        },
         
         // Invalid expressions that won't work
-        ("Syntax Error".to_string(), "amount * )".to_string()),
-        ("Unknown Variable".to_string(), "unknown_var > 10".to_string()),
-        ("Type Error".to_string(), "amount + \"string\" == 0".to_string()),
+        ExpressionRule {
+            name: "Syntax Error".to_string(),
+            expression: "amount * )".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Unknown Variable".to_string(),
+            expression: "unknown_var > 10".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Type Error".to_string(),
+            expression: "amount + \"string\" == 0".to_string(),
+            score: 100,
+        },
     ];
     
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
@@ -310,8 +382,16 @@ async fn test_empty_features() {
     // Create scorer with expressions
     let expressions = vec![
         // Static boolean expression
-        ("Always True".to_string(), "true".to_string()),
-        ("Missing Feature Check".to_string(), "missing_feature == 10".to_string()), // This should fail
+        ExpressionRule {
+            name: "Always True".to_string(),
+            expression: "true".to_string(),
+            score: 100,
+        },
+        ExpressionRule {
+            name: "Missing Feature Check".to_string(),
+            expression: "missing_feature == 10".to_string(),
+            score: 100,
+        }, // This should fail
     ];
     
     let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
@@ -336,7 +416,7 @@ async fn test_empty_expressions() {
     ];
 
     // Create scorer with no expressions
-    let empty_expressions: Vec<(String, String)> = vec![];
+    let empty_expressions: Vec<ExpressionRule> = vec![];
     let scorer = ExpressionBasedScorer::new_with_expressions(empty_expressions);
 
     // Score features

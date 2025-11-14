@@ -219,6 +219,7 @@ export function FilterBuilder({ fields, onApplyFilter, initialRequest }: FilterB
           Operator.NotEqual,
           Operator.Like,
           Operator.In,
+          Operator.NotIn,
           Operator.IsNull,
           Operator.IsNotNull
         ];
@@ -232,6 +233,7 @@ export function FilterBuilder({ fields, onApplyFilter, initialRequest }: FilterB
           Operator.LessThanOrEqual,
           Operator.Between,
           Operator.In,
+          Operator.NotIn,
           Operator.IsNull,
           Operator.IsNotNull
         ];
@@ -248,7 +250,7 @@ export function FilterBuilder({ fields, onApplyFilter, initialRequest }: FilterB
           Operator.IsNotNull
         ];
       case FieldType.Boolean:
-        return [Operator.Equal, Operator.NotEqual];
+        return [Operator.Equal, Operator.NotEqual, Operator.IsNull, Operator.IsNotNull];
       default:
         return [Operator.Equal, Operator.NotEqual];
     }

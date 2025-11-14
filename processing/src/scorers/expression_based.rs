@@ -5,8 +5,15 @@ use crate::{
     scorers::Scorer,
 };
 
+#[derive(Debug, Clone)]
+pub struct ExpressionRule {
+    pub name: String,
+    pub expression: String,
+    pub score: i32
+}
+
 pub struct ExpressionBasedScorer {
-    expressions: Vec<(String, String)>,
+    expressions: Vec<ExpressionRule>,
 }
 
 impl ExpressionBasedScorer {
@@ -14,7 +21,7 @@ impl ExpressionBasedScorer {
         Self { expressions: Vec::new() }
     }
 
-    pub fn new_with_expressions(expressions: Vec<(String, String)>) -> Self {
+    pub fn new_with_expressions(expressions: Vec<ExpressionRule>) -> Self {
         Self { expressions }
     }
     
@@ -50,57 +57,33 @@ impl ExpressionBasedScorer {
         context
     }
     
-    // Convert an evalexpr Value to a score (100 for true, 0 for false)
-    fn value_to_score(&self, value: Value) -> i32 {
-        match value {
-            Value::Boolean(true) => 100,
-            Value::Boolean(false) => 0,
-            _ => {
-                // Non-boolean results are unexpected
-                #[cfg(test)]
-                println!("  Warning: Expression produced non-boolean result: {:?}", value);
-                #[cfg(not(test))]
-                tracing::warn!("Expression produced non-boolean result: {:?}", value);
-                
-                // Default to 0 for non-boolean results
-                0
-            }
-        }
-    }
 }
 
 #[async_trait]
 impl Scorer for ExpressionBasedScorer {
     async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult> {
         let context = self.setup_context(&features);
-        let mut results = Vec::new();
-        
-        for (name, expr) in &self.expressions {
-            #[cfg(test)]
-            println!("Evaluating expression: {} = {}", name, expr);
-            
+
+        self.expressions.iter().filter_map(|expression| {
             // Evaluate the expression
-            match eval_with_context(expr, &context) {
+            match eval_with_context(expression.expression.as_str(), &context) {
                 Ok(value) => {
-                    let score = self.value_to_score(value.clone());
-                    
-                    #[cfg(test)]
-                    println!("  Result: {:?} -> score: {}", value, score);
-                    
-                    results.push(ScorerResult {
-                        name: name.to_string(),
+                    match value {
+                        Value::Boolean(true) => Some(expression.score),
+                        _ => None,
+                    }.map(|score| ScorerResult {
+                        name: expression.name.clone(),
                         score,
-                    });
+                    })
                 },
                 Err(e) => {
                     #[cfg(test)]
-                    println!("  Error evaluating expression '{}': {}", expr, e);
+                    println!("  Error evaluating expression '{}': {} {}", expression.name, expression.expression, e);
                     #[cfg(not(test))]
-                    tracing::warn!("Error evaluating expression '{}': {}", expr, e);
+                    tracing::warn!("Error evaluating expression '{}': {} {}", expression.name, expression.expression, e);
+                    None
                 }
             }
-        }
-        
-        results
+        }).collect()
     }
 }

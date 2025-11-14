@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE processing_queue\n            SET processed_at = NOW()\n            WHERE transaction_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "202e010011dbc2b8a2d1720efe6a110cce770bf1fdf730f1c804359bec57bb1d"
+}

@@ -1,3 +1,4 @@
+use crate::model::processible::{ColumnValueTrait, Filter, ProcessibleSerde};
 use crate::model::*;
 use crate::storage::common::CommonStorage;
 use crate::model::LabelSource;
@@ -7,10 +8,11 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use jsonschema::validate;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, DbBackend, EntityTrait, IntoActiveModel, NotSet, QueryFilter, QueryOrder, Set, Statement, TransactionTrait};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, IntoActiveModel, NotSet, QueryFilter, QueryOrder, Set, Statement, TransactionTrait};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::error::Error;
+use std::marker::PhantomData;
 use tracing::debug;
 
 // Default implementation for MatcherConfig
@@ -19,15 +21,16 @@ fn default_matcher_config() -> MatcherConfig {
 }
 
 #[derive(Clone)]
-pub struct ProdCommonStorage {
+pub struct ProdCommonStorage<P: ProcessibleSerde> {
     pub db: DatabaseConnection,
     pub matcher_configs: HashMap<String, MatcherConfig>,
+    pub _phantom: PhantomData<P>,
 }
 
-impl ProdCommonStorage {
+impl<P: ProcessibleSerde> ProdCommonStorage<P> {
     pub async fn new(database_url: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let db = Database::connect(database_url).await?;
-        Ok(Self { db, matcher_configs: Self::default_configs() })
+        Ok(Self { db, matcher_configs: Self::default_configs(), _phantom: PhantomData })
     }
 
     pub async fn with_configs(
@@ -35,7 +38,7 @@ impl ProdCommonStorage {
         matcher_configs: HashMap<String, MatcherConfig>,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let db = Database::connect(database_url).await?;
-        Ok(Self { db, matcher_configs })
+        Ok(Self { db, matcher_configs, _phantom: PhantomData })
     }
     
     fn default_configs() -> HashMap<String, MatcherConfig> {
@@ -49,19 +52,6 @@ impl ProdCommonStorage {
         config
     }
 
-    pub async fn insert_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        let model = entities::transaction::ActiveModel {
-            id: NotSet,
-            label_id: Set(None),
-            comment: Set(None),
-            last_scoring_date: Set(None),
-            processing_complete: Set(false),
-            created_at: NotSet,
-        };
-        let res = model.insert(&self.db).await?;
-        Ok(res.id)
-    }
-
     pub fn validate_features(&self, features: &[Feature]) -> Result<(), Box<dyn Error + Send + Sync>> {
         let features_json = serde_json::to_value(features)?;
         debug!("Raw features JSON string: {}", serde_json::to_string(&features_json)?);
@@ -71,6 +61,32 @@ impl ProdCommonStorage {
             return Err(format!("Feature validation failed: {:?}", errors).into());
         }
         Ok(())
+    }
+
+
+    fn get_filter_statement(&self, filters: &[Filter<Box<dyn ColumnValueTrait>>]) -> String {
+        let columns = <P as ProcessibleSerde>::list_column_fields();
+        
+        let base_stmt = "SELECT * FROM transactions".to_string();
+        if filters.is_empty() {
+            return base_stmt;
+        }
+
+        let filters_stmt = filters.iter().map(|filter| {
+            let maybe_filter_statement = columns
+                .iter()
+                .find(|column| column.column == filter.column)
+                .expect(&format!("Column not found for filter {}", filter.column))
+                .filter_statement
+                .clone();
+            
+            let filter_statement = maybe_filter_statement
+                .expect(&format!("Filter is not defined for column {}", filter.column));
+            
+            filter_statement(&filter)
+        }).collect::<Vec<String>>().join(" AND ");
+
+        base_stmt + &" WHERE " + &filters_stmt
     }
 
     pub fn get_features_schema(&self) -> Value {
@@ -170,11 +186,57 @@ impl ProdCommonStorage {
 }
 
 #[async_trait]
-impl CommonStorage for ProdCommonStorage {
-    async fn save_transaction(&self) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
-        self.insert_transaction().await
+impl<P: ProcessibleSerde> CommonStorage for ProdCommonStorage<P> {
+    async fn insert_transaction(
+        &self,
+        payload_number: String,
+        payload: serde_json::Value,
+        schema_version: SchemaVersion,
+    ) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+        let model = entities::transaction::ActiveModel {
+            id: NotSet,
+            payload_number: Set(payload_number),
+            payload: Set(payload),
+            schema_version_major: Set(schema_version.0),
+            schema_version_minor: Set(schema_version.1),
+            label_id: Set(None),
+            comment: Set(None),
+            last_scoring_date: Set(None),
+            processing_complete: Set(false),
+            created_at: NotSet,
+        };
+        let res = model.insert(&self.db).await?;
+        Ok(res.id)
     }
 
+    async fn get_transaction(
+        &self,
+        transaction_id: ModelId,
+    ) -> Result<Transaction, Box<dyn Error + Send + Sync>> {
+        let model = entities::transaction::Entity::find_by_id(transaction_id)
+            .one(&self.db)
+            .await?
+            .ok_or_else(|| format!("Transaction not found: {}", transaction_id))?;
+        Ok(model.into())
+    }
+
+    async fn filter_transactions(
+        &self,
+        filters: &[Filter<Box<dyn ColumnValueTrait>>],
+    ) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>> {
+        let sql = self.get_filter_statement(filters);
+
+        let transactions = self.db.query_all(
+            Statement::from_string(DbBackend::Postgres, sql)
+        )
+        .await?
+        .into_iter()
+        .map(|row| Transaction::from_query_result(&row, "").expect("Failed to convert row to transaction"))
+        .collect();
+
+        Ok(transactions)
+    }
+ 
     async fn mark_transaction_processed(
         &self,
         transaction_id: ModelId,
@@ -496,25 +558,6 @@ impl CommonStorage for ProdCommonStorage {
         Ok(rules)
     }
     
-    // removed save_label/get_label per design: labels are created during label_transactions only
-    
-    async fn update_transaction_label(
-        &self,
-        transaction_id: ModelId,
-        label_id: ModelId,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let _ = self
-            .db
-            .execute(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "UPDATE transactions SET label_id = $1 WHERE id = $2",
-                vec![label_id.into(), transaction_id.into()],
-            ))
-            .await?;
-        
-        Ok(())
-    }
-    /// Label multiple transactions with the same label in a batch operation
     async fn label_transactions(
         &self,
         transaction_ids: &[ModelId],
@@ -534,9 +577,22 @@ impl CommonStorage for ProdCommonStorage {
             }.insert(&self.db).await?;
             let label_id = label_model.id;
             
-            self.update_transaction_label(transaction_id, label_id).await?
+            entities::transaction::Entity::update(entities::transaction::ActiveModel {
+                id: Set(transaction_id),
+                label_id: Set(Some(label_id)),
+                payload_number: NotSet,
+                payload: NotSet,
+                schema_version_major: NotSet,
+                schema_version_minor: NotSet,
+                comment: NotSet,
+                last_scoring_date: NotSet,
+                processing_complete: NotSet,
+                created_at: NotSet,
+            }).filter(entities::transaction::Column::Id.eq(transaction_id))
+            .exec(&self.db)
+            .await?;
         }
         
         Ok(())
     }
-} 
+}

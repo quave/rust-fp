@@ -3,10 +3,45 @@ use processing::{
     storage::CommonStorage,
 };
 use common::test_helpers::{truncate_processing_tables, create_test_transaction};
+use sqlx::PgPool;
 use std::error::Error;
 use serial_test::serial;
 
 use super::setup::{get_test_storage};
+
+async fn get_match_node_id(pool: &PgPool, matcher: &str, value: &str) -> Result<i64, Box<dyn Error + Send + Sync>> {
+    let row = sqlx::query!("SELECT id FROM match_node WHERE matcher = $1 AND value = $2", matcher, value)
+        .fetch_one(pool).await?;
+    Ok(row.id)
+}
+
+async fn get_transactions_for_match_node(pool: &PgPool, node_id: i64) -> Result<Vec<i64>, Box<dyn Error + Send + Sync>> {
+    let rows = sqlx::query!("SELECT transaction_id FROM match_node_transactions WHERE node_id = $1", node_id)
+        .fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|row| row.transaction_id).collect())
+}
+
+async fn count_all_match_node_transactions(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+    let row = sqlx::query!("SELECT COUNT(*) as count FROM match_node_transactions").fetch_one(pool).await?;
+    Ok(row.count.unwrap_or(0))
+}
+
+async fn get_all_match_nodes(pool: &PgPool) -> Result<Vec<(String, String, i32, i32)>, Box<dyn Error + Send + Sync>> {
+    let rows = sqlx::query!("SELECT matcher, value, confidence, importance FROM match_node")
+        .fetch_all(pool).await?;
+    Ok(rows.into_iter().map(|row| (row.matcher, row.value, row.confidence, row.importance)).collect())
+}
+
+async fn count_match_nodes(pool: &PgPool) -> Result<i64, Box<dyn Error + Send + Sync>> {
+    let row = sqlx::query!("SELECT COUNT(*) as count FROM match_node").fetch_one(pool).await?;
+    Ok(row.count.unwrap_or(0))
+}
+
+async fn count_match_node_transactions(pool: &PgPool, transaction_id: i64) -> Result<i64, Box<dyn Error + Send + Sync>> {
+    let row = sqlx::query!("SELECT COUNT(*) as count FROM match_node_transactions WHERE transaction_id = $1", transaction_id)
+        .fetch_one(pool).await?;
+    Ok(row.count.unwrap_or(0))
+}
 
 #[tokio::test]
 #[serial]
@@ -47,7 +82,7 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     storage.save_matching_fields(transaction_id1, &matching_fields1).await?;
     
     // Query database to verify nodes were created
-    let saved_nodes = common::test_helpers::get_all_match_nodes(&pool).await?;
+    let saved_nodes = get_all_match_nodes(&pool).await?;
     
     // Verify 3 nodes were created with correct values
     assert_eq!(saved_nodes.len(), 3, "Expected 3 match nodes to be created");
@@ -76,7 +111,7 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     assert_eq!(test_node.3, 50);  // Default importance
     
     // Verify node-transaction connections
-    let connection_count = common::test_helpers::count_match_node_transactions(&pool, transaction_id1 as i64).await?;
+    let connection_count = count_match_node_transactions(&pool, transaction_id1 as i64).await?;
     
     assert_eq!(connection_count, 3, "Expected 3 node-transaction connections");
     
@@ -96,16 +131,16 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     storage.save_matching_fields(transaction_id2, &matching_fields2).await?;
     
     // Verify nodes after second save
-    let updated_nodes = common::test_helpers::get_all_match_nodes(&pool).await?;
+    let updated_nodes = get_all_match_nodes(&pool).await?;
     
     // Should now have 4 nodes (the 3 from before plus the new ip.address)
     assert_eq!(updated_nodes.len(), 4, "Expected 4 match nodes after second save");
     
     // Verify connections between transactions
-    let common_node_id = common::test_helpers::get_match_node_id(&pool, "customer.email", "test@example.com").await?;
+    let common_node_id = get_match_node_id(&pool, "customer.email", "test@example.com").await?;
     
     // Check that both transactions are connected to the same node
-    let connected_transactions = common::test_helpers::get_transactions_for_match_node(&pool, common_node_id).await?;
+    let connected_transactions = get_transactions_for_match_node(&pool, common_node_id).await?;
     
     assert_eq!(connected_transactions.len(), 2, "Expected both transactions to be connected to the common node");
     assert_eq!(connected_transactions[0], transaction_id1 as i64);
@@ -115,12 +150,12 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     storage.save_matching_fields(transaction_id1, &matching_fields1).await?;
     
     // Check that node count hasn't changed
-    let final_node_count = common::test_helpers::count_match_nodes(&pool).await?;
+    let final_node_count = count_match_nodes(&pool).await?;
     
     assert_eq!(final_node_count, 4, "Node count should not change after duplicate save");
     
     // Check that node-transaction connections haven't duplicated
-    let final_connection_count = common::test_helpers::count_all_match_node_transactions(&pool).await?;
+    let final_connection_count = count_all_match_node_transactions(&pool).await?;
     
     assert_eq!(final_connection_count, 5, "Expected 5 total node-transaction connections");
     
@@ -145,12 +180,12 @@ async fn test_save_matching_fields_empty() -> Result<(), Box<dyn Error + Send + 
     storage.save_matching_fields(transaction_id, &empty_fields).await?;
     
     // Verify no nodes were created
-    let node_count = common::test_helpers::count_match_nodes(&pool).await?;
+    let node_count = count_match_nodes(&pool).await?;
     
     assert_eq!(node_count, 0, "No nodes should be created with empty fields");
     
     // Verify no connections were created
-    let connection_count = common::test_helpers::count_all_match_node_transactions(&pool).await?;
+    let connection_count = count_all_match_node_transactions(&pool).await?;
     
     assert_eq!(connection_count, 0, "No connections should be created with empty fields");
     

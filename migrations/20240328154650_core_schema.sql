@@ -24,9 +24,13 @@ CREATE INDEX IF NOT EXISTS idx_labels_label_source ON labels(label_source);
 
 CREATE TABLE IF NOT EXISTS transactions (
     id BIGSERIAL PRIMARY KEY,
-    label_id BIGINT,
-    comment TEXT,
-    last_scoring_date TIMESTAMP,
+    payload_number TEXT NOT NULL UNIQUE,
+    payload JSONB NOT NULL,
+    schema_version_major INTEGER NOT NULL,
+    schema_version_minor INTEGER NOT NULL,
+    label_id BIGINT NULL,
+    comment TEXT NULL,
+    last_scoring_date TIMESTAMP NULL,
     processing_complete BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
@@ -121,18 +125,18 @@ CREATE INDEX IF NOT EXISTS idx_features_schema_version_major_minor ON features(s
 
 CREATE TABLE IF NOT EXISTS processing_queue (
     id BIGSERIAL PRIMARY KEY,
-    processable_id BIGINT NOT NULL,
+    transaction_id BIGINT NOT NULL,
     processed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_processing_queue_processable_id ON processing_queue(processable_id);
+CREATE INDEX IF NOT EXISTS idx_processing_queue_transaction_id ON processing_queue(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_processing_queue_created_at ON processing_queue(created_at);
 
 CREATE TABLE IF NOT EXISTS recalculation_queue (
     id BIGSERIAL PRIMARY KEY,
-    processable_id BIGINT NOT NULL,
+    transaction_id BIGINT NOT NULL,
     processed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS idx_recalculation_queue_processable_id ON recalculation_queue(processable_id);
+CREATE INDEX IF NOT EXISTS idx_recalculation_queue_transaction_id ON recalculation_queue(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_recalculation_queue_created_at ON recalculation_queue(created_at);

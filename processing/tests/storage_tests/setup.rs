@@ -1,18 +1,15 @@
 use processing::{
-    model::ModelId,
+    model::{ModelId, ProcessibleSerde},
     storage::ProdCommonStorage,
 };
-use common::test_helpers::{setup_test_environment, create_test_pool, generate_unique_test_id};
+use common::test_helpers::{setup_test_environment, create_test_pool};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::error::Error;
 use tracing::debug;
 use tokio::sync::OnceCell;
 
-/// Convert the centralized test ID to ModelId
-pub fn get_unique_model_id() -> ModelId {
-    generate_unique_test_id() as ModelId
-}
+use crate::mocks::TestPayload;
 
 // Global async schema setup: runs only once per test process
 static SETUP: OnceCell<()> = OnceCell::const_new();
@@ -25,17 +22,17 @@ pub async fn ensure_setup() {
 }
 
 // Helper to create a DB pool and storage, plus reset tables
-pub async fn get_test_storage() -> Result<(PgPool, ProdCommonStorage), Box<dyn Error + Send + Sync>> {
+pub async fn get_test_storage() -> Result<(PgPool, ProdCommonStorage<TestPayload>), Box<dyn Error + Send + Sync>> {
     ensure_setup().await;
     let pool = create_test_pool().await?;
-    let storage = create_test_common_storage().await?;
+    let storage = create_test_common_storage::<TestPayload>().await?;
     // Note: No longer dropping tables here since it interferes with parallel tests
     // The schema is set up once in ensure_setup() and shared across all tests
     Ok((pool, storage))
 }
 
 /// Create a common storage instance for testing
-async fn create_test_common_storage() -> Result<ProdCommonStorage, Box<dyn Error + Send + Sync>> {
+async fn create_test_common_storage<P: ProcessibleSerde>() -> Result<ProdCommonStorage<P>, Box<dyn Error + Send + Sync>> {
     use common::test_helpers::get_test_database_url;
     let database_url = get_test_database_url();
     let storage = ProdCommonStorage::new(&database_url).await?;
@@ -43,8 +40,8 @@ async fn create_test_common_storage() -> Result<ProdCommonStorage, Box<dyn Error
 }
 
 // Helper function to save raw features for testing
-pub async fn save_raw_features(
-    storage: &ProdCommonStorage,
+pub async fn save_raw_features<P: ProcessibleSerde>(
+    storage: &ProdCommonStorage<P>,
     transaction_id: ModelId,
     features_json: Value,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {

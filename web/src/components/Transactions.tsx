@@ -4,40 +4,16 @@ import SearchIcon from '@mui/icons-material/Search';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import { FilterBuilder } from './FilterBuilder';
-import { FilterRequest, transactionFields } from './FilterTypes';
+import { FilterRequest, Field } from './FilterTypes';
+import { buildFilters, graphqlFetch, introspectFilters } from '../lib/graphql';
 
-interface TransactionItem {
+interface UITransaction {
   id: number;
-  name: string;
-  category: string;
-  price: number;
-}
-
-interface Customer {
-  id: number;
-  name: string;
-  email: string;
-}
-
-interface Billing {
-  id: number;
-  payment_type: string;
-  payment_details: string;
-  billing_address: string;
-}
-
-interface Transaction {
-  order: {
-    id: number;
-    order_number: string;
-    delivery_type: string;
-    delivery_details: string;
-    created_at: string;
-    status: 'completed' | 'pending' | 'cancelled';
-  };
-  items: TransactionItem[];
-  customer: Customer;
-  billing: Billing;
+  orderNumber: string;
+  customerName: string;
+  createdAt: string;
+  totalAmount: number;
+  status: 'completed' | 'pending';
 }
 
 // Define fraud level enum based on backend
@@ -62,13 +38,14 @@ const fraudCategories = [
 type FilterStatus = 'all' | 'completed' | 'pending';
 
 export function Transactions() {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<UITransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [filterRequest, setFilterRequest] = useState<FilterRequest>({ sort: [] });
+  const [fields, setFields] = useState<Field[]>([]);
   
   // Batch labeling state
   const [batchLabelMode, setBatchLabelMode] = useState(false);
@@ -78,29 +55,64 @@ export function Transactions() {
   const [labelingInProgress, setLabelingInProgress] = useState(false);
 
   useEffect(() => {
-    fetchTransactions();
+    const bootstrap = async () => {
+      try {
+        setLoading(true);
+        const dynFields = await introspectFilters();
+        setFields(dynFields);
+        await fetchTransactions();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to initialize');
+      } finally {
+        setLoading(false);
+      }
+    };
+    bootstrap();
   }, []);
 
   const fetchTransactions = async (customFilter?: FilterRequest) => {
     setLoading(true);
     try {
-      // If we have a customFilter, use the new filter endpoint
-      const endpoint = customFilter ? 'http://localhost:8000/api/transactions/filter' : 'http://localhost:8000/api/transactions';
-      const options = customFilter ? {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(customFilter),
-      } : undefined;
-      
-      const response = await fetch(endpoint, options);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch transactions');
-      }
-      const data = await response.json();
-      setTransactions(data);
+      // Always pass an object for GraphQL `filters` arg to satisfy `.object()` on backend
+      const filters = customFilter ? (buildFilters(customFilter, fields) || {}) : {};
+      const QUERY = `
+        query Transactions($filters: InputFilters) {
+          transaction(filters: $filters) {
+            id
+            processing_complete
+            created_at
+            payload {
+              order_number
+              created_at
+              total_amount
+              customer_name
+            }
+          }
+        }
+      `;
+      type GqlTx = {
+        transaction: Array<{
+          id: number;
+          processing_complete: boolean;
+          created_at: string;
+          payload: {
+            order_number: string;
+            created_at: string;
+            total_amount: number;
+            customer_name: string;
+          };
+        }>;
+      };
+      const data = await graphqlFetch<GqlTx>(QUERY, { filters });
+      const mapped: UITransaction[] = data.transaction.map(t => ({
+        id: t.id,
+        orderNumber: t.payload.order_number,
+        customerName: t.payload.customer_name,
+        createdAt: t.payload.created_at ?? t.created_at,
+        totalAmount: Number(t.payload.total_amount ?? 0),
+        status: t.processing_complete ? 'completed' : 'pending',
+      }));
+      setTransactions(mapped);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -127,7 +139,7 @@ export function Transactions() {
     if (selectedTransactions.length === filteredTransactions.length) {
       setSelectedTransactions([]);
     } else {
-      setSelectedTransactions(filteredTransactions.map(t => t.order.id));
+      setSelectedTransactions(filteredTransactions.map(t => t.id));
     }
   };
 
@@ -167,13 +179,7 @@ export function Transactions() {
       setSelectedTransactions([]);
       
       // Refresh transaction list to show updated labels
-      // This is a simple approach - in a real app you might want to
-      // just update the local state instead of refetching
-      const refreshResponse = await fetch('http://localhost:8000/api/transactions');
-      if (refreshResponse.ok) {
-        const data = await refreshResponse.json();
-        setTransactions(data);
-      }
+      await fetchTransactions(filterRequest);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while labeling');
     } finally {
@@ -189,11 +195,11 @@ export function Transactions() {
     }
     
     const matchesSearch = 
-      transaction.order.order_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      transaction.customer.name.toLowerCase().includes(searchQuery.toLowerCase());
+      transaction.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      transaction.customerName.toLowerCase().includes(searchQuery.toLowerCase());
     
     if (filterStatus === 'all') return matchesSearch;
-    return matchesSearch && transaction.order.status === filterStatus;
+    return matchesSearch && transaction.status === filterStatus;
   });
 
   if (loading) return <div className="loading">Loading transactions...</div>;
@@ -259,7 +265,7 @@ export function Transactions() {
       
       {showAdvancedFilters && (
         <FilterBuilder 
-          fields={transactionFields}
+          fields={fields}
           onApplyFilter={handleApplyFilter}
           initialRequest={filterRequest}
         />
@@ -333,30 +339,30 @@ export function Transactions() {
           </thead>
           <tbody>
             {filteredTransactions.map((transaction) => (
-              <tr key={transaction.order.id}>
+              <tr key={transaction.id}>
                 {batchLabelMode && (
                   <td>
                     <input 
                       type="checkbox" 
-                      checked={selectedTransactions.includes(transaction.order.id)}
-                      onChange={() => toggleTransactionSelection(transaction.order.id)}
+                      checked={selectedTransactions.includes(transaction.id)}
+                      onChange={() => toggleTransactionSelection(transaction.id)}
                     />
                   </td>
                 )}
                 <td>
                   <div className="id-cell">
                     <span className="user-icon">👤</span>
-                    {transaction.order.id}
+                    {transaction.id}
                   </div>
                 </td>
-                <td>{transaction.order.order_number}</td>
-                <td>{transaction.customer.name}</td>
-                <td>{new Date(transaction.order.created_at).toLocaleDateString()}</td>
+                <td>{transaction.orderNumber}</td>
+                <td>{transaction.customerName}</td>
+                <td>{new Date(transaction.createdAt).toLocaleDateString()}</td>
                 <td className="amount">
-                  ${transaction.items.reduce((sum, item) => sum + item.price, 0).toFixed(2)}
+                  ${transaction.totalAmount.toFixed(2)}
                 </td>
                 <td>
-                  {transaction.order.status === 'completed' ? (
+                  {transaction.status === 'completed' ? (
                     <CheckCircleIcon className="status-icon completed" />
                   ) : (
                     <CancelIcon className="status-icon pending" />
