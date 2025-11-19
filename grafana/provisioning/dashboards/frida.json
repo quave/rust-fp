@@ -1,0 +1,136 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Imported - Total",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(frida_import_total{status=\"ok\"})", "legendFormat": "total" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Import Rate (P50/P75/P95/P99)",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "quantile(0.5, rate(frida_import_total{status=\"ok\"}[5m]))", "legendFormat": "p50" },
+        { "expr": "quantile(0.75, rate(frida_import_total{status=\"ok\"}[5m]))", "legendFormat": "p75" },
+        { "expr": "quantile(0.95, rate(frida_import_total{status=\"ok\"}[5m]))", "legendFormat": "p95" },
+        { "expr": "quantile(0.99, rate(frida_import_total{status=\"ok\"}[5m]))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Import Duration (P50/P75/P95/P99)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(frida_import_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.75, sum(rate(frida_import_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))", "legendFormat": "p75" },
+        { "expr": "histogram_quantile(0.95, sum(rate(frida_import_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(frida_import_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Processed - Total",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "sum(frida_process_total{kind=\"process\",status=\"ok\"})", "legendFormat": "total" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Processed Rate",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 12 },
+      "targets": [
+        { "expr": "sum(rate(frida_process_total{kind=\"process\",status=\"ok\"}[5m]))", "legendFormat": "rate" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Process Duration (P50/P75/P95/P99)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(frida_processing_stage_seconds_bucket{stage=\"process_total\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.75, sum(rate(frida_processing_stage_seconds_bucket{stage=\"process_total\"}[5m])) by (le))", "legendFormat": "p75" },
+        { "expr": "histogram_quantile(0.95, sum(rate(frida_processing_stage_seconds_bucket{stage=\"process_total\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(frida_processing_stage_seconds_bucket{stage=\"process_total\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Recalc - Total",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "sum(frida_process_total{kind=\"recalc\",status=\"ok\"})", "legendFormat": "total" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Recalc Rate",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 24 },
+      "targets": [
+        { "expr": "sum(rate(frida_process_total{kind=\"recalc\",status=\"ok\"}[5m]))", "legendFormat": "rate" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Recalc Duration (P50/P75/P95/P99)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(frida_recalc_stage_seconds_bucket{stage=\"recalc_total\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.75, sum(rate(frida_recalc_stage_seconds_bucket{stage=\"recalc_total\"}[5m])) by (le))", "legendFormat": "p75" },
+        { "expr": "histogram_quantile(0.95, sum(rate(frida_recalc_stage_seconds_bucket{stage=\"recalc_total\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(frida_recalc_stage_seconds_bucket{stage=\"recalc_total\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Processor Threads",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 36 },
+      "targets": [
+        { "expr": "max(frida_processor_threads)", "legendFormat": "threads" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU by Service (cAdvisor)",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 36 },
+      "targets": [
+        { "expr": "sum(rate(container_cpu_usage_seconds_total{container=~\"importer|processor|web\"}[5m])) by (container)", "legendFormat": "{{container}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory RSS by Service (cAdvisor)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "targets": [
+        { "expr": "container_memory_rss{container=~\"importer|processor|web\"}", "legendFormat": "{{container}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Disk IO Bytes by Service (cAdvisor)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "targets": [
+        { "expr": "rate(container_fs_writes_bytes_total{container=~\"importer|processor|web\"}[5m])", "legendFormat": "{{container}} writes" },
+        { "expr": "rate(container_fs_reads_bytes_total{container=~\"importer|processor|web\"}[5m])", "legendFormat": "{{container}} reads" }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["frida", "prometheus"],
+  "timezone": "",
+  "title": "Frida Overview",
+  "version": 1
+}
+
+

@@ -4,6 +4,8 @@ use async_graphql::{
     dynamic::{Field, FieldFuture, FieldValue, InputObject, InputValue, Object, Schema, SchemaError, TypeRef},
     Value
 };
+use metrics::histogram;
+use std::time::Instant;
 
 use crate::{
     model::{
@@ -150,7 +152,12 @@ pub fn schema<P: Processible + ProcessibleSerde + 'static>(common_storage: Arc<d
                     let filters_object = ctx.args.try_get("filters")?.object()?;
                     let filters = filters::parse_filters::<P>(column_types, filters_object)?;
 
+                    let t0 = Instant::now();
                     let txs = storage.filter_transactions(&filters).await?;
+                    {
+                        let h = histogram!("frida_backend_filter_seconds", "op" => "filter_transactions");
+                        h.record(t0.elapsed().as_secs_f64());
+                    }
                     let field_values_vec: Vec<FieldValue> = txs.into_iter().map(|tx| FieldValue::owned_any(tx)).collect();
                     Ok(Some(FieldValue::list(field_values_vec)))
                 })

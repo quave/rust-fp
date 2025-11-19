@@ -27,7 +27,7 @@ impl ProdQueue {
 #[async_trait]
 impl QueueService for ProdQueue {
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!("Enqueuing transaction to the db: {:?}", id);
+        info!("Queue[processing_queue]: Enqueuing transaction: {:?}", id);
         sqlx::query("INSERT INTO processing_queue (transaction_id) VALUES ($1)")
             .bind(&id)
             .execute(&self.pool)
@@ -87,7 +87,7 @@ impl RecalcQueue {
 #[async_trait]
 impl QueueService for RecalcQueue {
     async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!("Enqueuing transaction to the db: {:?}", id);
+        info!("Queue[recalculation_queue]: Enqueuing transaction: {:?}", id);
         sqlx::query("INSERT INTO recalculation_queue (transaction_id) VALUES ($1)")
             .bind(&id)
             .execute(&self.pool)

@@ -217,7 +217,9 @@ mock! {
 
     #[async_trait]
     impl processing::scorers::Scorer for ScorerService {
-        async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult>;
+        async fn score_and_save_result(&self, transaction_id: ModelId, activation_id: ModelId, features: Vec<Feature>) -> Result<(), Box<dyn Error + Send + Sync>>;
+        fn scorer_type(&self) -> ScoringModelType;
+        fn channel_id(&self) -> ModelId;
     }
 }
 
@@ -226,6 +228,9 @@ mock! {
 
     #[async_trait]
     impl CommonStorage for CommonStorage {
+        async fn get_activation_by_channel_id(&self, channel_id: ModelId) -> Result<channel_model_activation::Model, Box<dyn Error + Send + Sync>>;
+        async fn get_channel_by_name(&self, name: &str) -> Result<Option<Channel>, Box<dyn Error + Send + Sync>>;
+        async fn get_expression_rules(&self, channel_id: ModelId) -> Result<Vec<expression_rule::Model>, Box<dyn Error + Send + Sync>>;
         async fn insert_transaction(
             &self,
             payload_number: String,
@@ -250,9 +255,9 @@ mock! {
         async fn save_scores(
             &self,
             _transaction_id: i64,
-            _channel_id: i64,
+            _activation_id: i64,
             _total_score: i32,
-            _triggered_rules: &[TriggeredRule],
+            _triggered_rules: &[ModelId],
         ) -> Result<(), Box<dyn Error + Send + Sync>>;
     
         async fn find_connected_transactions(
@@ -348,6 +353,9 @@ impl ConnectionTrackingStorage {
 
 #[async_trait]
 impl CommonStorage for ConnectionTrackingStorage {
+    async fn get_activation_by_channel_id(&self, channel_id: ModelId) -> Result<channel_model_activation::Model, Box<dyn Error + Send + Sync>> { Ok(channel_model_activation::Model { id: 0, channel_id: channel_id, model_id: 0, created_at: chrono::Utc::now().naive_utc() }) }
+    async fn get_channel_by_name(&self, name: &str) -> Result<Option<Channel>, Box<dyn Error + Send + Sync>> { Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 1, created_at: chrono::Utc::now().naive_utc() })) }
+    async fn get_expression_rules(&self, _channel_id: ModelId) -> Result<Vec<expression_rule::Model>, Box<dyn Error + Send + Sync>> { Ok(vec![]) }
     async fn filter_transactions(&self, _filters: &[processible::Filter<Box<dyn ColumnValueTrait>>]) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>> { Ok(vec![]) }
     async fn insert_transaction(
         &self,
@@ -401,9 +409,9 @@ impl CommonStorage for ConnectionTrackingStorage {
     async fn save_scores(
         &self,
         _transaction_id: i64,
-        _channel_id: i64,
+        _activation_id: i64,
         _total_score: i32,
-        _triggered_rules: &[TriggeredRule],
+        _triggered_rules: &[ModelId],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         Ok(())
     }
@@ -483,33 +491,30 @@ mock! {
 
     #[async_trait]
     impl processing::scorers::Scorer for Scorer {
-        async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult>;
+        async fn score_and_save_result(&self, transaction_id: ModelId, activation_id: ModelId, features: Vec<Feature>) -> Result<(), Box<dyn Error + Send + Sync>>;
+        fn scorer_type(&self) -> ScoringModelType;
+        fn channel_id(&self) -> ModelId;
     }
 }
 
 // Helper functions for common scorer configurations
 pub fn create_high_value_scorer() -> MockScorer {
     let mut scorer = MockScorer::new();
-    scorer.expect_score()
-        .returning(|_| vec![
-            ScorerResult { score: 85, name: "high_amount_score".to_string() },
-            ScorerResult { score: 70, name: "premium_category_score".to_string() },
-        ]);
+    scorer.expect_score_and_save_result()
+        .returning(|_, _, _| Ok(()));
     scorer
 }
 
 pub fn create_low_value_scorer() -> MockScorer {
     let mut scorer = MockScorer::new();
-    scorer.expect_score()
-        .returning(|_| vec![
-            ScorerResult { score: 25, name: "low_amount_score".to_string() },
-        ]);
+    scorer.expect_score_and_save_result()
+        .returning(|_, _, _| Ok(()));
     scorer
 }
 
 pub fn create_empty_scorer() -> MockScorer {
     let mut scorer = MockScorer::new();
-    scorer.expect_score()
-        .returning(|_| vec![]);
+    scorer.expect_score_and_save_result()
+        .returning(|_, _, _| Ok(()));
     scorer
 } 

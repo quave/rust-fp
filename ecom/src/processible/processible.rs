@@ -22,6 +22,12 @@ impl Processible for EcomOrder {
     ) -> Vec<Feature> {
         let mut features = Vec::new();
 
+        // Count of items
+        features.push(Feature {
+            name: "item_count".to_string(),
+            value: Box::new(FeatureValue::Int(self.items.len() as i64)),
+        });
+
         features.push(Feature {
             name: "amount".to_string(),
             value: Box::new(FeatureValue::Double(
@@ -49,6 +55,25 @@ impl Processible for EcomOrder {
                 chrono::DateTime::from_timestamp(self.created_at.timestamp(), 0)
                     .unwrap_or_else(|| chrono::Utc::now())
             )),
+        });
+
+        // Derived order time as "HH:MM:SS" string for rule comparisons
+        let order_time_str = self.created_at.format("%H:%M:%S").to_string();
+        features.push(Feature {
+            name: "order_time".to_string(),
+            value: Box::new(FeatureValue::String(order_time_str)),
+        });
+
+        // Placeholder for new-customer logic; set to false for now
+        features.push(Feature {
+            name: "is_new_customer".to_string(),
+            value: Box::new(FeatureValue::Bool(false)),
+        });
+
+        // Best-effort country code; default to "US"
+        features.push(Feature {
+            name: "country_code".to_string(),
+            value: Box::new(FeatureValue::String("US".to_string())),
         });
 
         features.push(Feature {

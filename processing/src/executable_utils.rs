@@ -1,5 +1,6 @@
 use async_graphql::http::GraphiQLSource;
 use clap::Parser;
+use tracing_subscriber::EnvFilter;
 use std::{error::Error, fmt::Debug, marker::PhantomData, sync::Arc};
 use axum::{
     extract::Json, http::StatusCode, response::{self, IntoResponse, Response}, routing::{get, post}, Router
@@ -11,12 +12,48 @@ use tower_http::{
 };
 use http::header;
 use common::config::{Config, BackendConfig};
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use once_cell::sync::OnceCell;
 use crate::{
     importer::Importer,
     model::{FraudLevel, LabelSource, ModelId, Processible, ProcessibleSerde},
     queue::QueueService,
     storage::{CommonStorage, ProdCommonStorage},
 };
+
+static PROM_HANDLE: OnceCell<PrometheusHandle> = OnceCell::new();
+
+pub fn init_prometheus() -> Result<PrometheusHandle, Box<dyn Error + Send + Sync>> {
+    if let Some(h) = PROM_HANDLE.get() {
+        return Ok(h.clone());
+    }
+
+    let builder = PrometheusBuilder::new()
+        // Buckets for importer
+        .set_buckets_for_metric(
+            Matcher::Full("frida_import_duration_seconds".to_string()),
+            &[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+        )?
+        // Buckets for processing
+        .set_buckets_for_metric(
+            Matcher::Full("frida_processing_stage_seconds".to_string()),
+            &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+        )?
+        // Buckets for recalculation
+        .set_buckets_for_metric(
+            Matcher::Full("frida_recalc_stage_seconds".to_string()),
+            &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
+        )?
+        // Buckets for backend filter
+        .set_buckets_for_metric(
+            Matcher::Full("frida_backend_filter_seconds".to_string()),
+            &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
+        )?;
+
+    let handle = builder.install_recorder().map_err(|e| format!("Failed to install Prometheus recorder: {}", e))?;
+    let _ = PROM_HANDLE.set(handle.clone());
+    Ok(handle)
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -40,28 +77,27 @@ pub fn initialize_executable() -> Result<Config, Box<dyn Error + Send + Sync>> {
 
     let args = Args::parse();
     println!("Loading config from: {}", args.config);
-    let config = Config::load(&args.config)?;
+    let mut config = Config::load(&args.config)?;
+    if let Ok(db_url) = std::env::var("DATABASE_URL") {
+        if !db_url.trim().is_empty() {
+            println!("Overriding config.common.database_url from env DATABASE_URL");
+            config.common.database_url = db_url;
+        }
+    }
     println!("Loaded config: {:#?}", config);
 
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive(tracing::Level::INFO.into()))
-        .init();
-
-    // At the start of main:
-    println!("Starting...");
-    println!("Working directory: {:?}", std::env::current_dir()?);
-    println!(
-        "Config directory: {:?}",
-        std::env::var("CONFIG_DIR").unwrap_or_default()
-    );
-    println!(
-        "Database URL: {:?}",
-        std::env::var("DATABASE_URL").unwrap_or_default()
-    );
-
     Ok(config)
+}
+
+pub fn initialize_tracing(log_directive: &str) {
+    let env_filter = EnvFilter::from_default_env()
+        .add_directive(log_directive.parse().unwrap());
+    
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_thread_ids(true)
+        .with_writer(std::io::stdout)
+        .init();
 }
 
 pub async fn run_importer<P>(
@@ -73,9 +109,16 @@ where
 {
     let storage = Arc::new(ProdCommonStorage::<P>::new(&config.common.database_url).await?);
     let importer = Importer::<P>::new(storage, queue);
+    // init prometheus and capture handle for /metrics
+    let metrics_handle = init_prometheus()?;
+    let metrics_path = config.importer.metrics_path.clone();
     let app = Router::new()
         .route("/import", post(import_transaction::<P>))
         .route("/health", get(health_check))
+        .route(&metrics_path, get(move || {
+            let h = metrics_handle.clone();
+            async move { h.render() }
+        }))
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()
@@ -138,11 +181,18 @@ where
         common_storage,
     };
 
+    // init prometheus and capture handle for /metrics
+    let metrics_handle = init_prometheus()?;
+    let metrics_path = config.metrics_path.clone();
     let app = Router::new()
         .route("/api/transactions/graphql", get(graphiql).post_service(GraphQL::new(schema)))
         
         .route("/api/transactions/label", post(label_transaction::<P>))
         .route("/health", get(health_check))
+        .route(&metrics_path, get(move || {
+            let h = metrics_handle.clone();
+            async move { h.render() }
+        }))
         .layer(TraceLayer::new_for_http())
         .layer(
             CorsLayer::new()

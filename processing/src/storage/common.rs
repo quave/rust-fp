@@ -1,4 +1,4 @@
-use crate::model::{Feature, processible::{ColumnValueTrait, Filter}, *};
+use crate::model::{Feature, expression_rule::Model as ExpressionRule, processible::{ColumnValueTrait, Filter}, *};
 use async_trait::async_trait;
 use std::error::Error;
 use crate::model::{Channel, ScoringEvent, TriggeredRule};
@@ -34,12 +34,27 @@ pub trait CommonStorage: Send + Sync {
         graph_features: &'a [Feature],
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
+    async fn get_activation_by_channel_id(
+        &self,
+        channel_id: ModelId,
+    ) -> Result<channel_model_activation::Model, Box<dyn Error + Send + Sync>>;
+
+    async fn get_channel_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<Channel>, Box<dyn Error + Send + Sync>>;
+
+    async fn get_expression_rules(
+        &self,
+        channel_id: ModelId,
+    ) -> Result<Vec<ExpressionRule>, Box<dyn Error + Send + Sync>>;
+
     async fn save_scores(
         &self,
         transaction_id: ModelId,
-        channel_id: ModelId,
+        activation_id: ModelId,
         total_score: i32,
-        triggered_rules: &[TriggeredRule],
+        triggered_rules: &[ModelId],
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     async fn get_features(

@@ -11,8 +11,8 @@ async fn test_processor_process() {
     
     // Set up mocks using mockall - OPTIMAL FIRST approach
     let mut scorer = MockScorer::new();
-    scorer.expect_score()
-        .returning(|_| vec![ScorerResult { name: "test_score".to_string(), score: 100 }]);
+    scorer.expect_score_and_save_result()
+        .returning(|_, _, _| Ok(()));
     
     // Create features for the mock storage
     let features = vec![
@@ -61,8 +61,8 @@ async fn test_processor_process_with_nonexistent_transaction() {
     
     // Set up mocks - processible storage returns None
     let mut scorer = MockScorer::new();
-    scorer.expect_score()
-        .returning(|_| vec![]);
+    scorer.expect_score_and_save_result()
+        .returning(|_, _, _| Ok(()));
     let storage = create_mock_common_storage(Some(1), vec![]);
     
     let mut queue = MockQueueService::new();
@@ -99,8 +99,8 @@ async fn test_processor_with_custom_matching_config(){
     
     // Use simple custom mock
     let mut scorer = MockScorer::new();
-    scorer.expect_score()
-        .returning(|_| vec![ScorerResult { name: "custom_score".to_string(), score: 75 }]);
+    scorer.expect_score_and_save_result()
+        .returning(|_, _, _| Ok(()));
     let storage = create_mock_common_storage(Some(tx_id), expected_features);
     
     // Create mockall-based processible storage

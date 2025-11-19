@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT transaction_id\n            FROM processing_queue\n            WHERE processed_at IS NULL\n            ORDER BY created_at ASC\n            FOR UPDATE SKIP LOCKED\n            LIMIT $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "transaction_id",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f7381795793a48b41fd9e62a497f9b13e9c47de3272e71300bff8b4cb5324467"
+}

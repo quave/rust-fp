@@ -1,3 +1,4 @@
+use crate::model::expression_rule::Model as ExpressionRule;
 use crate::model::processible::{ColumnValueTrait, Filter, ProcessibleSerde};
 use crate::model::*;
 use crate::storage::common::CommonStorage;
@@ -99,24 +100,17 @@ impl<P: ProcessibleSerde> ProdCommonStorage<P> {
                 "properties": {
                     "name": {
                         "type": "string",
-                        "enum": [
-                            "amount",
-                            "is_high_value",
-                            "amounts",
-                            "created_at",
-                            "categories"
-                        ]
                     },
                     "type": {
                         "type": "string",
                         "enum": [
                             "integer",
-                            "number",
+                            "double",
                             "string",
                             "boolean",
                             "datetime",
                             "integer_array",
-                            "number_array",
+                            "double_array",
                             "string_array",
                             "boolean_array"
                         ]
@@ -131,7 +125,13 @@ impl<P: ProcessibleSerde> ProdCommonStorage<P> {
                         "oneOf": [
                             {
                                 "properties": {
-                                    "type": { "const": "number" },
+                                    "type": { "const": "integer" },
+                                    "value": { "type": "number" }
+                                }
+                            },
+                            {
+                                "properties": {
+                                    "type": { "const": "double" },
                                     "value": { "type": "number" }
                                 }
                             },
@@ -161,7 +161,7 @@ impl<P: ProcessibleSerde> ProdCommonStorage<P> {
                             },
                             {
                                 "properties": {
-                                    "type": { "const": "number_array" },
+                                    "type": { "const": "double_array" },
                                     "value": { "type": "array", "items": { "type": "number" } }
                                 }
                             },
@@ -253,18 +253,59 @@ impl<P: ProcessibleSerde> CommonStorage for ProdCommonStorage<P> {
         Ok(())
     }
 
+    async fn get_activation_by_channel_id(
+        &self,
+        channel_id: ModelId,
+    ) -> Result<channel_model_activation::Model, Box<dyn Error + Send + Sync>> {
+        let activation = entities::channel_model_activation::Entity::find()
+            .filter(entities::channel_model_activation::Column::ChannelId.eq(channel_id))
+            .order_by_desc(entities::channel_model_activation::Column::CreatedAt)
+            .one(&self.db)
+            .await?
+            .ok_or_else(|| format!("Activation not found for channel: {}", channel_id))?;
+        Ok(activation)
+    }
+
+    async fn get_expression_rules(
+        &self,
+        channel_id: ModelId,
+    ) -> Result<Vec<ExpressionRule>, Box<dyn Error + Send + Sync>> {
+        let rules = entities::expression_rule::Entity::find()
+            .filter(entities::expression_rule::Column::ModelId.eq(channel_id))
+            .all(&self.db)
+            .await?;
+        let rules: Vec<ExpressionRule> = rules
+            .into_iter()
+            .map(|row| ExpressionRule { id: row.id, model_id: row.model_id, name: row.name, description: row.description, rule: row.rule, score: row.score, created_at: row.created_at })
+            .collect();
+        Ok(rules)
+    }
+
+    async fn get_channel_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<Channel>, Box<dyn Error + Send + Sync>> {
+        let row = entities::channel::Entity::find()
+            .filter(entities::channel::Column::Name.eq(name.to_string()))
+            .one(&self.db)
+            .await?;
+        Ok(row.map(|r| Channel { id: r.id, name: r.name, model_id: r.model_id, created_at: r.created_at }))
+    }
+
+
     async fn save_scores(
         &self,
         transaction_id: ModelId,
-        channel_id: ModelId,
+        activation_id: ModelId,
         total_score: i32,
-        triggered_rules: &[TriggeredRule],
+        triggered_rules: &[ModelId],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let txn = self.db.begin().await?;
+       
         let scoring_am = entities::scoring_event::ActiveModel {
             id: NotSet,
             transaction_id: Set(transaction_id),
-            channel_id: Set(channel_id),
+            activation_id: Set(activation_id),
             total_score: Set(total_score),
             created_at: Set(chrono::Utc::now().naive_utc()),
         };
@@ -274,7 +315,7 @@ impl<P: ProcessibleSerde> CommonStorage for ProdCommonStorage<P> {
             let tr = entities::triggered_rule::ActiveModel {
                 id: NotSet,
                 scoring_events_id: Set(scoring.id),
-                rule_id: Set(rule.rule_id),
+                rule_id: Set(*rule),
             };
             tr.insert(&txn).await?;
         }

@@ -1,13 +1,16 @@
 !include base.yaml
 
 common:
-  database_url: postgresql://postgres:postgres@0.0.0.0:5435/frida_test
+  database_url: postgresql://postgres:postgres@db:5435/frida_test
 
 importer:
   log_level: debug
+  metrics_path: /metrics
 
 backend:
   log_level: debug
+  metrics_path: /metrics
 
 processor:
-  log_level: debug,sqlx=info
+  log_level: debug
+  metrics_address: 0.0.0.0:9100

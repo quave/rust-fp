@@ -1,21 +1,114 @@
 version: '3.8'
 
 services:
+  importer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./importer", "--config", "/app/config/total_config.yaml"]
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/frida_test
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./backend", "--config", "/app/config/total_config.yaml"]
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/frida_test
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./processor", "--config", "/app/config/total_config.yaml"]
+    environment:
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/frida_test
+    ports:
+      - "9100:9100"
+    depends_on:
+      - db
+
   db:
     image: postgres:16
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=frida
+      - POSTGRES_DB=frida_test
     ports:
       - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d frida" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d frida_test" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-dev
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus/prometheus-dev.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - db
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-dev
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data_dev:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor-dev
+    ports:
+      - "8086:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    depends_on:
+      - db
+  
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter-dev
+    environment:
+      - DATA_SOURCE_URI=db:5432/postgres?sslmode=disable
+      - DATA_SOURCE_USER=postgres
+      - DATA_SOURCE_PASS=postgres
+    ports:
+      - "9188:9187"
+    depends_on:
+      - db
+
 volumes:
   postgres_data:
+  grafana_data_dev:

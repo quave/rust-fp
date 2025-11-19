@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
 use processing::{
-    model::{Feature, FeatureValue},
-    scorers::{ExpressionBasedScorer, ExpressionRule, Scorer},
+    model::{Feature, FeatureValue, Channel, sea_orm_storage_model::expression_rule::Model as ExpressionRule},
+    scorers::{ExpressionBasedScorer, Scorer},
 };
+use crate::mocks::MockCommonStorage;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn test_int_feature() {
@@ -14,23 +16,36 @@ async fn test_int_feature() {
         },
     ];
 
-    // Create scorer with expressions that produce boolean results
-    let expressions = vec![
-        ExpressionRule {
-            name: "Transaction Count Score".to_string(),
-            expression: "transaction_count > 5".to_string(),
-            score: 100,
-        },
-    ];
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
+    let expressions = vec![ExpressionRule {
+        id: 1,
+        model_id: 0,
+        name: "Transaction Count Score".to_string(),
+        description: None,
+        rule: "transaction_count > 5".to_string(),
+        score: 100,
+        created_at: chrono::Utc::now().naive_utc(),
+    }];
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage
+        .expect_get_expression_rules()
+        .returning({
+            let expressions = expressions.clone();
+            move |_| Ok(expressions.clone())
+        });
+    storage
+        .expect_save_scores()
+        .returning(|_, _, total, triggered| {
+            assert_eq!(total, 100);
+            assert_eq!(triggered.len(), 1);
+            Ok(())
+        });
 
-    // Verify results
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].name, "Transaction Count Score");
-    assert_eq!(results[0].score, 100); // transaction_count > 5 is true, so score is 100
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -43,23 +58,35 @@ async fn test_double_feature() {
         },
     ];
 
-    // Create scorer with expressions that produce boolean results
-    let expressions = vec![
-        ExpressionRule {
-            name: "High Amount Score".to_string(),
-            expression: "amount > 100.0".to_string(),
-            score: 100,
-        },
-    ];
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
+    let expressions = vec![ExpressionRule {
+        id: 2,
+        model_id: 0,
+        name: "High Amount Score".to_string(),
+        description: None,
+        rule: "amount > 100.0".to_string(),
+        score: 100,
+        created_at: chrono::Utc::now().naive_utc(),
+    }];
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 100);
+        assert_eq!(triggered.len(), 1);
+        Ok(())
+    });
 
-    // Verify results
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].name, "High Amount Score");
-    assert_eq!(results[0].score, 100); // amount > 100.0 is true, so score is 100
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -74,26 +101,32 @@ async fn test_bool_feature() {
 
     println!("Created feature: is_high_risk = true");
 
-    // Create scorer with expressions - just use the boolean directly
-    let expressions = vec![
-        ExpressionRule {
-            name: "Risk Score".to_string(),
-            expression: "is_high_risk".to_string(),
-            score: 100,
-        },
-    ];
-    println!("Using expression: is_high_risk");
-    
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
+    let expressions = vec![ExpressionRule {
+        id: 3,
+        model_id: 0,
+        name: "Risk Score".to_string(),
+        description: None,
+        rule: "is_high_risk".to_string(),
+        score: 100,
+        created_at: chrono::Utc::now().naive_utc(),
+    }];
 
-    // Score features
-    let results = scorer.score(features).await;
-    println!("Got results: {:?}", results);
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 100);
+        assert_eq!(triggered.len(), 1);
+        Ok(())
+    });
 
-    // Verify results
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].name, "Risk Score");
-    assert_eq!(results[0].score, 100); // is_high_risk is true, so score is 100
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -106,24 +139,32 @@ async fn test_string_feature() {
         },
     ];
 
-    // Create scorer with expressions
-    let expressions = vec![
-        // Simple string equality
-        ExpressionRule {
-            name: "Country Risk Score".to_string(),
-            expression: "country == \"US\"".to_string(),
-            score: 100,
-        },
-    ];
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
+    let expressions = vec![ExpressionRule {
+        id: 4,
+        model_id: 0,
+        name: "Country Risk Score".to_string(),
+        description: None,
+        rule: "country == \"US\"".to_string(),
+        score: 100,
+        created_at: chrono::Utc::now().naive_utc(),
+    }];
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 100);
+        assert_eq!(triggered.len(), 1);
+        Ok(())
+    });
 
-    // Verify results
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].name, "Country Risk Score");
-    assert_eq!(results[0].score, 100); // country == "US" is true, so score is 100
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -153,33 +194,43 @@ async fn test_datetime_feature() {
     let time_diff = newer_date.timestamp_millis() - older_date.timestamp_millis();
     assert!(time_diff > 0, "Newer date should have larger timestamp");
     
-    // Create scorer with expressions - all boolean results
     let expressions = vec![
-        // Simple boolean comparison
         ExpressionRule {
+            id: 5,
+            model_id: 0,
             name: "Date Age Score".to_string(),
-            expression: "recent_date > created_at".to_string(),
+            description: None,
+            rule: "recent_date > created_at".to_string(),
             score: 100,
+            created_at: chrono::Utc::now().naive_utc(),
         },
-        
-        // Boolean expression using a fixed comparison
         ExpressionRule {
+            id: 6,
+            model_id: 0,
             name: "Recent Enough".to_string(),
-            expression: "recent_date > 1600000000000".to_string(),
+            description: None,
+            rule: "recent_date > 1600000000000".to_string(),
             score: 100,
-        }, // Timestamp comparison
+            created_at: chrono::Utc::now().naive_utc(),
+        },
     ];
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 200);
+        assert_eq!(triggered.len(), 2);
+        Ok(())
+    });
 
-    // Verify results
-    assert_eq!(results.len(), 2);
-    assert_eq!(results[0].name, "Date Age Score");
-    assert_eq!(results[0].score, 100); // recent_date > created_at is true, so score is 100
-    assert_eq!(results[1].name, "Recent Enough");
-    assert_eq!(results[1].score, 100); // recent_date > 1600000000000 should be true
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -208,51 +259,29 @@ async fn test_array_features() {
         },
     ];
 
-    // Create scorer with expressions - all boolean results
     let expressions = vec![
-        // Test array lengths with boolean comparisons
-        ExpressionRule {
-            name: "Many Purchases".to_string(),
-            expression: "len(purchase_amounts) > 3".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Few Items".to_string(),
-            expression: "len(item_counts) < 5".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Multiple Categories".to_string(),
-            expression: "len(categories) >= 3".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Has Flags".to_string(),
-            expression: "len(high_value_flags) > 0".to_string(),
-            score: 100,
-        },
+        ExpressionRule { id: 7, model_id: 0, name: "Many Purchases".to_string(), description: None, rule: "len(purchase_amounts) > 3".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 8, model_id: 0, name: "Few Items".to_string(), description: None, rule: "len(item_counts) < 5".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 9, model_id: 0, name: "Multiple Categories".to_string(), description: None, rule: "len(categories) >= 3".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 10, model_id: 0, name: "Has Flags".to_string(), description: None, rule: "len(high_value_flags) > 0".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
     ];
-    
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 400);
+        assert_eq!(triggered.len(), 4);
+        Ok(())
+    });
 
-    // Verify results - boolean expressions
-    assert_eq!(results.len(), 4);
-    
-    // Check boolean results
-    let many_purchases = results.iter().find(|r| r.name == "Many Purchases").unwrap();
-    assert_eq!(many_purchases.score, 100); // len(purchase_amounts) > 3 is true, len is 4
-    
-    let few_items = results.iter().find(|r| r.name == "Few Items").unwrap();
-    assert_eq!(few_items.score, 100); // len(item_counts) < 5 is true, len is 4
-    
-    let multiple_categories = results.iter().find(|r| r.name == "Multiple Categories").unwrap();
-    assert_eq!(multiple_categories.score, 100); // len(categories) >= 3 is true, len is 3
-    
-    let has_flags = results.iter().find(|r| r.name == "Has Flags").unwrap();
-    assert_eq!(has_flags.score, 100); // len(high_value_flags) > 0 is true, len is 3
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -277,51 +306,29 @@ async fn test_combined_features() {
         },
     ];
 
-    // Create scorer with expressions that all output boolean values
     let expressions = vec![
-        // All expressions produce boolean results
-        ExpressionRule {
-            name: "High Amount".to_string(),
-            expression: "total_amount > 500.0".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Multiple Transactions".to_string(),
-            expression: "transaction_count >= 5".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "New Customer".to_string(),
-            expression: "is_new_customer".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Credit Card Used".to_string(),
-            expression: "payment_method == \"credit_card\"".to_string(),
-            score: 100,
-        },
+        ExpressionRule { id: 11, model_id: 0, name: "High Amount".to_string(), description: None, rule: "total_amount > 500.0".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 12, model_id: 0, name: "Multiple Transactions".to_string(), description: None, rule: "transaction_count >= 5".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 13, model_id: 0, name: "New Customer".to_string(), description: None, rule: "is_new_customer".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 14, model_id: 0, name: "Credit Card Used".to_string(), description: None, rule: "payment_method == \"credit_card\"".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
     ];
-    
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 400);
+        assert_eq!(triggered.len(), 4);
+        Ok(())
+    });
 
-    // Verify results
-    assert_eq!(results.len(), 4);
-    
-    // Check boolean results
-    let high_amount = results.iter().find(|r| r.name == "High Amount").unwrap();
-    assert_eq!(high_amount.score, 100); // total_amount > 500.0 is true
-    
-    let multiple_transactions = results.iter().find(|r| r.name == "Multiple Transactions").unwrap();
-    assert_eq!(multiple_transactions.score, 100); // transaction_count >= 5 is true
-    
-    let new_customer = results.iter().find(|r| r.name == "New Customer").unwrap();
-    assert_eq!(new_customer.score, 100); // is_new_customer is true
-    
-    let credit_card_used = results.iter().find(|r| r.name == "Credit Card Used").unwrap();
-    assert_eq!(credit_card_used.score, 100); // payment_method == "credit_card" is true
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -334,44 +341,29 @@ async fn test_invalid_expressions() {
         },
     ];
 
-    // Create scorer with expressions - all boolean or invalid
     let expressions = vec![
-        // Valid boolean expression
-        ExpressionRule {
-            name: "Valid Score".to_string(),
-            expression: "amount > 50.0".to_string(),
-            score: 100,
-        },
-        
-        // Invalid expressions that won't work
-        ExpressionRule {
-            name: "Syntax Error".to_string(),
-            expression: "amount * )".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Unknown Variable".to_string(),
-            expression: "unknown_var > 10".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Type Error".to_string(),
-            expression: "amount + \"string\" == 0".to_string(),
-            score: 100,
-        },
+        ExpressionRule { id: 15, model_id: 0, name: "Valid Score".to_string(), description: None, rule: "amount > 50.0".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 16, model_id: 0, name: "Syntax Error".to_string(), description: None, rule: "amount * )".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 17, model_id: 0, name: "Unknown Variable".to_string(), description: None, rule: "unknown_var > 10".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 18, model_id: 0, name: "Type Error".to_string(), description: None, rule: "amount + \"string\" == 0".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
     ];
-    
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 100);
+        assert_eq!(triggered.len(), 1);
+        Ok(())
+    });
 
-    // Only the valid boolean expression should succeed
-    assert_eq!(results.len(), 1);
-    
-    // Check the valid score
-    let valid_score = results.iter().find(|r| r.name == "Valid Score").unwrap();
-    assert_eq!(valid_score.score, 100); // amount > 50.0 is true
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 }
 
 #[tokio::test]
@@ -379,30 +371,27 @@ async fn test_empty_features() {
     // No features
     let empty_features: Vec<Feature> = vec![];
 
-    // Create scorer with expressions
     let expressions = vec![
-        // Static boolean expression
-        ExpressionRule {
-            name: "Always True".to_string(),
-            expression: "true".to_string(),
-            score: 100,
-        },
-        ExpressionRule {
-            name: "Missing Feature Check".to_string(),
-            expression: "missing_feature == 10".to_string(),
-            score: 100,
-        }, // This should fail
+        ExpressionRule { id: 19, model_id: 0, name: "Always True".to_string(), description: None, rule: "true".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
+        ExpressionRule { id: 20, model_id: 0, name: "Missing Feature Check".to_string(), description: None, rule: "missing_feature == 10".to_string(), score: 100, created_at: chrono::Utc::now().naive_utc() },
     ];
-    
-    let scorer = ExpressionBasedScorer::new_with_expressions(expressions);
 
-    // Score features
-    let results = scorer.score(empty_features).await;
+    let mut storage = MockCommonStorage::new();
+    storage
+        .expect_get_channel_by_name()
+        .returning(|name| Ok(Some(Channel { id: 1, name: name.to_string(), model_id: 0, created_at: chrono::Utc::now().naive_utc() })));
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 100);
+        assert_eq!(triggered.len(), 1);
+        Ok(())
+    });
 
-    // Verify results - only the static boolean expression should succeed
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].name, "Always True");
-    assert_eq!(results[0].score, 100);
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, empty_features).await.unwrap();
 }
 
 #[tokio::test]
@@ -415,13 +404,19 @@ async fn test_empty_expressions() {
         },
     ];
 
-    // Create scorer with no expressions
-    let empty_expressions: Vec<ExpressionRule> = vec![];
-    let scorer = ExpressionBasedScorer::new_with_expressions(empty_expressions);
+    let expressions: Vec<ExpressionRule> = vec![];
 
-    // Score features
-    let results = scorer.score(features).await;
+    let mut storage = MockCommonStorage::new();
+    storage.expect_get_expression_rules().returning({
+        let expressions = expressions.clone();
+        move |_| Ok(expressions.clone())
+    });
+    storage.expect_save_scores().returning(|_, _, total, triggered| {
+        assert_eq!(total, 0);
+        assert_eq!(triggered.len(), 0);
+        Ok(())
+    });
 
-    // Verify results - should be empty
-    assert_eq!(results.len(), 0);
+    let scorer = ExpressionBasedScorer::new_init("Basic".to_string(), Arc::new(storage)).await.unwrap();
+    scorer.score_and_save_result(42, 77, features).await.unwrap();
 } 

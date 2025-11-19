@@ -45,6 +45,8 @@ evalexpr.workspace = true
 lazy_static = { workspace = true }
 strum = "0.27.2"
 strum_macros = "0.27.2"
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 
 [dev-dependencies]
 common = { path = "../common", features = ["processing-mocks"] }

@@ -1,30 +1,28 @@
+use std::{error::Error, sync::Arc};
+
 use async_trait::async_trait;
 use evalexpr::*;
 use crate::{
-    model::{ScorerResult, Feature},
-    scorers::Scorer,
+    model::{Feature, ModelId, ScoringModelType, sea_orm_storage_model::expression_rule::Model as ExpressionRule},
+    scorers::Scorer, storage::CommonStorage,
 };
 
-#[derive(Debug, Clone)]
-pub struct ExpressionRule {
-    pub name: String,
-    pub expression: String,
-    pub score: i32
+pub struct ExpressionBasedScorer<S: CommonStorage> {
+    expression_rules: Vec<ExpressionRule>,
+    channel_id: ModelId,
+    #[allow(dead_code)]
+    channel_name: String,
+    storage: Arc<S>,
 }
 
-pub struct ExpressionBasedScorer {
-    expressions: Vec<ExpressionRule>,
-}
-
-impl ExpressionBasedScorer {
-    pub fn new() -> Self {
-        Self { expressions: Vec::new() }
+impl<S: CommonStorage> ExpressionBasedScorer<S> {
+    pub async fn new_init(channel_name: String, storage: Arc<S>) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let channel = storage.get_channel_by_name(&channel_name).await?
+            .ok_or_else(|| format!("Channel not found by name: {}", channel_name))?;
+        let expression_rules = storage.get_expression_rules(channel.model_id).await?;
+        Ok(Self { expression_rules, channel_id: channel.id, channel_name, storage })
     }
 
-    pub fn new_with_expressions(expressions: Vec<ExpressionRule>) -> Self {
-        Self { expressions }
-    }
-    
     fn setup_context(&self, features: &[Feature]) -> HashMapContext {
         let mut context = HashMapContext::new();
         
@@ -60,30 +58,39 @@ impl ExpressionBasedScorer {
 }
 
 #[async_trait]
-impl Scorer for ExpressionBasedScorer {
-    async fn score(&self, features: Vec<Feature>) -> Vec<ScorerResult> {
+impl<S: CommonStorage> Scorer for ExpressionBasedScorer<S> {
+    fn scorer_type(&self) -> ScoringModelType { ScoringModelType::RuleBased }
+    fn channel_id(&self) -> ModelId {self.channel_id }
+    // we could also expose channel_name if needed later
+
+    async fn score_and_save_result(&self, transaction_id: ModelId, activation_id: ModelId, features: Vec<Feature>) -> Result<(), Box<dyn Error + Send + Sync>> {
         let context = self.setup_context(&features);
 
-        self.expressions.iter().filter_map(|expression| {
-            // Evaluate the expression
-            match eval_with_context(expression.expression.as_str(), &context) {
-                Ok(value) => {
-                    match value {
-                        Value::Boolean(true) => Some(expression.score),
+        let triggered_rules = 
+            self.expression_rules
+            .iter()
+            .filter_map(|expression| {
+                // Evaluate the expression
+                match eval_with_context(&expression.rule.as_str(), &context) {
+                    Ok(value) => match value {
+                        Value::Boolean(true) => Some(expression),
                         _ => None,
-                    }.map(|score| ScorerResult {
-                        name: expression.name.clone(),
-                        score,
-                    })
-                },
-                Err(e) => {
-                    #[cfg(test)]
-                    println!("  Error evaluating expression '{}': {} {}", expression.name, expression.expression, e);
-                    #[cfg(not(test))]
-                    tracing::warn!("Error evaluating expression '{}': {} {}", expression.name, expression.expression, e);
-                    None
+                    },
+                    Err(e) => {
+                        #[cfg(test)]
+                        println!("  Error evaluating expression '{}': {} {}", expression.name, expression.rule, e);
+                        #[cfg(not(test))]
+                        tracing::error!("Error evaluating expression '{}': {} {}", expression.name, expression.rule, e);
+                        None
+                    }
                 }
-            }
-        }).collect()
+            });
+
+        let total_score: i32 = triggered_rules.clone().fold(0, |a, b| a + b.score);
+        let triggered_rule_ids: Vec<ModelId> = triggered_rules.map(|rule| rule.id).collect();
+
+        self.storage.save_scores(transaction_id, activation_id, total_score, &triggered_rule_ids).await?;
+
+        Ok(())
     }
 }

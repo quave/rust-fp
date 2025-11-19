@@ -30,18 +30,6 @@ pub struct MatchingField {
     pub value: String,
 }
 
-#[derive(Debug, Clone, Eq)]
-pub struct ScorerResult {
-    pub score: i32,
-    pub name: String,
-}
-
-impl PartialEq for ScorerResult {
-    fn eq(&self, other: &Self) -> bool {
-        self.score == other.score && self.name == other.name
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectedTransaction {
     pub transaction_id: ModelId,

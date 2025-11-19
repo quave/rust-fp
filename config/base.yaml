@@ -5,15 +5,18 @@ common:
 importer:
   server_address: 0.0.0.0:3000
   log_level: info
+  metrics_path: /metrics
 
 backend:
   server_address: 0.0.0.0:8000
   log_level: info
+  metrics_path: /metrics
 
 processor:
   threads: 2
   log_level: info
   sleep_ms: 1000
+  metrics_address: 0.0.0.0:9100
   matcher_configs:
     customer.email: [100, 100]
     customer.phone: [100, 80]

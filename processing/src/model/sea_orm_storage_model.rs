@@ -51,7 +51,7 @@ impl Serialize for FeatureValue {
                 map.serialize_entry("value", v)?;
             }
             FeatureValue::Double(v) => {
-                map.serialize_entry("type", "number")?;
+                map.serialize_entry("type", "double")?;
                 map.serialize_entry("value", v)?;
             }
             FeatureValue::String(v) => {
@@ -71,7 +71,7 @@ impl Serialize for FeatureValue {
                 map.serialize_entry("value", v)?;
             }
             FeatureValue::DoubleList(v) => {
-                map.serialize_entry("type", "number_array")?;
+                map.serialize_entry("type", "double_array")?;
                 map.serialize_entry("value", v)?;
             }
             FeatureValue::StringList(v) => {
@@ -103,7 +103,7 @@ impl<'de> Deserialize<'de> for FeatureValue {
         let helper = FeatureValueHelper::deserialize(deserializer)?;
         match helper.type_.as_str() {
             "integer" => Ok(FeatureValue::Int(helper.value.as_i64().ok_or_else(|| D::Error::custom("invalid integer"))?)),
-            "number" => Ok(FeatureValue::Double(helper.value.as_f64().ok_or_else(|| D::Error::custom("invalid number"))?)),
+            "double" => Ok(FeatureValue::Double(helper.value.as_f64().ok_or_else(|| D::Error::custom("invalid double"))?)),
             "string" => Ok(FeatureValue::String(helper.value.as_str().ok_or_else(|| D::Error::custom("invalid string"))?.to_string())),
             "boolean" => Ok(FeatureValue::Bool(helper.value.as_bool().ok_or_else(|| D::Error::custom("invalid boolean"))?)),
             "datetime" => {
@@ -118,11 +118,11 @@ impl<'de> Deserialize<'de> for FeatureValue {
                 }
                 Ok(FeatureValue::IntList(result))
             }
-            "number_array" => {
+            "double_array" => {
                 let array = helper.value.as_array().ok_or_else(|| D::Error::custom("invalid array"))?;
                 let mut result = Vec::new();
                 for v in array {
-                    result.push(v.as_f64().ok_or_else(|| D::Error::custom("invalid number in array"))?);
+                    result.push(v.as_f64().ok_or_else(|| D::Error::custom("invalid double in array"))?);
                 }
                 Ok(FeatureValue::DoubleList(result))
             }
@@ -306,12 +306,15 @@ pub mod scoring_model {
     pub enum Relation {
         #[sea_orm(has_many = "super::channel::Entity")]
         Channel,
-        #[sea_orm(has_many = "super::scoring_rule::Entity")]
+        #[sea_orm(has_many = "super::expression_rule::Entity")]
         ScoringRule,
+        #[sea_orm(has_many = "super::channel_model_activation::Entity")]
+        ChannelModelActivation,
     }
 
     impl Related<super::channel::Entity> for Entity { fn to() -> RelationDef { Relation::Channel.def() } }
-    impl Related<super::scoring_rule::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringRule.def() } }
+    impl Related<super::expression_rule::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringRule.def() } }
+    impl Related<super::channel_model_activation::Entity> for Entity { fn to() -> RelationDef { Relation::ChannelModelActivation.def() } }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -334,12 +337,12 @@ pub mod channel {
     pub enum Relation {
         #[sea_orm(belongs_to = "super::scoring_model::Entity", from = "Column::ModelId", to = "super::scoring_model::Column::Id")]
         Model,
-        #[sea_orm(has_many = "super::scoring_event::Entity")]
-        ScoringEvent,
+        #[sea_orm(has_many = "super::channel_model_activation::Entity")]
+        ChannelModelActivation,
     }
 
     impl Related<super::scoring_model::Entity> for Entity { fn to() -> RelationDef { Relation::Model.def() } }
-    impl Related<super::scoring_event::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringEvent.def() } }
+    impl Related<super::channel_model_activation::Entity> for Entity { fn to() -> RelationDef { Relation::ChannelModelActivation.def() } }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -354,7 +357,7 @@ pub mod scoring_event {
         #[sea_orm(primary_key)]
         pub id: i64,
         pub transaction_id: i64,
-        pub channel_id: i64,
+        pub activation_id: i64,
         pub total_score: i32,
         pub created_at: NaiveDateTime,
     }
@@ -363,32 +366,63 @@ pub mod scoring_event {
     pub enum Relation {
         #[sea_orm(belongs_to = "super::transaction::Entity", from = "Column::TransactionId", to = "super::transaction::Column::Id")]
         Transaction,
-        #[sea_orm(belongs_to = "super::channel::Entity", from = "Column::ChannelId", to = "super::channel::Column::Id")]
-        Channel,
+        #[sea_orm(belongs_to = "super::channel_model_activation::Entity", from = "Column::ActivationId", to = "super::channel_model_activation::Column::Id")]
+        ChannelModelActivation,
         #[sea_orm(has_many = "super::triggered_rule::Entity")]
         TriggeredRule,
     }
 
     impl Related<super::transaction::Entity> for Entity { fn to() -> RelationDef { Relation::Transaction.def() } }
-    impl Related<super::channel::Entity> for Entity { fn to() -> RelationDef { Relation::Channel.def() } }
+    impl Related<super::channel_model_activation::Entity> for Entity { fn to() -> RelationDef { Relation::ChannelModelActivation.def() } }
     impl Related<super::triggered_rule::Entity> for Entity { fn to() -> RelationDef { Relation::TriggeredRule.def() } }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-// Scoring Rules
-pub mod scoring_rule {
+// Channel-Model Activations
+pub mod channel_model_activation {
     use super::*;
 
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-    #[sea_orm(table_name = "scoring_rules")]
+    #[sea_orm(table_name = "channel_model_activations")]
+    pub struct Model {
+        #[sea_orm(primary_key)]
+        pub id: i64,
+        pub channel_id: i64,
+        pub model_id: i64,
+        pub created_at: NaiveDateTime,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {
+        #[sea_orm(belongs_to = "super::channel::Entity", from = "Column::ChannelId", to = "super::channel::Column::Id")]
+        Channel,
+        #[sea_orm(belongs_to = "super::scoring_model::Entity", from = "Column::ModelId", to = "super::scoring_model::Column::Id")]
+        ScoringModel,
+        #[sea_orm(has_many = "super::scoring_event::Entity")]
+        ScoringEvent,
+    }
+
+    impl Related<super::channel::Entity> for Entity { fn to() -> RelationDef { Relation::Channel.def() } }
+    impl Related<super::scoring_model::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringModel.def() } }
+    impl Related<super::scoring_event::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringEvent.def() } }
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+// Scoring Rules
+pub mod expression_rule {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "expression_rules")]
     pub struct Model {
         #[sea_orm(primary_key)]
         pub id: i64,
         pub model_id: i64,
         pub name: String,
         pub description: Option<String>,
-        pub rule: serde_json::Value,
+        pub rule: String,
         pub score: i32,
         pub created_at: NaiveDateTime,
     }
@@ -424,12 +458,12 @@ pub mod triggered_rule {
     pub enum Relation {
         #[sea_orm(belongs_to = "super::scoring_event::Entity", from = "Column::ScoringEventsId", to = "super::scoring_event::Column::Id")]
         ScoringEvent,
-        #[sea_orm(belongs_to = "super::scoring_rule::Entity", from = "Column::RuleId", to = "super::scoring_rule::Column::Id")]
+        #[sea_orm(belongs_to = "super::expression_rule::Entity", from = "Column::RuleId", to = "super::expression_rule::Column::Id")]
         ScoringRule,
     }
 
     impl Related<super::scoring_event::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringEvent.def() } }
-    impl Related<super::scoring_rule::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringRule.def() } }
+    impl Related<super::expression_rule::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringRule.def() } }
 
     impl ActiveModelBehavior for ActiveModel {}
 }

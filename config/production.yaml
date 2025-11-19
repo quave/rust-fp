@@ -6,3 +6,4 @@ common:
 processor:
   threads: 4
   sleep_ms: 500 
+  metrics_address: 0.0.0.0:9100

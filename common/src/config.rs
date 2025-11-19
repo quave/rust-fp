@@ -11,12 +11,16 @@ pub struct CommonConfig {
 pub struct ImporterConfig {
     pub server_address: String,
     pub log_level: String,
+    #[serde(default = "default_metrics_path")]
+    pub metrics_path: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct BackendConfig {
     pub server_address: String,
     pub log_level: String,
+    #[serde(default = "default_metrics_path")]
+    pub metrics_path: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -26,6 +30,8 @@ pub struct ProcessorConfig {
     pub log_level: String,
     #[serde(default)]
     pub matcher_configs: Option<std::collections::HashMap<String, (i32, i32)>>,
+    #[serde(default = "default_processor_metrics_address")]
+    pub metrics_address: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -43,4 +49,12 @@ impl Config {
 
         Ok(config)
     }
+}
+
+fn default_metrics_path() -> String {
+    "/metrics".to_string()
+}
+
+fn default_processor_metrics_address() -> String {
+    "0.0.0.0:9100".to_string()
 }

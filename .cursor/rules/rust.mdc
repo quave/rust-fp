@@ -1,7 +1,5 @@
 ---
-description: 
-globs: *.rs
-alwaysApply: false
+alwaysApply: true
 ---
 You are an expert in Rust, async programming, and concurrent systems.
 

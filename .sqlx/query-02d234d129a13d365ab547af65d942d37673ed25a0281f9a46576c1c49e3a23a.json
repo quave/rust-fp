@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO transactions (id, payload_number, payload, schema_version_major, schema_version_minor) VALUES ($1, $2, '{}', 1, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "02d234d129a13d365ab547af65d942d37673ed25a0281f9a46576c1c49e3a23a"
+}

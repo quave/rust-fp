@@ -1,0 +1,79 @@
+---
+alwaysApply: false
+---
+
+<!-- Telemetry architecture & usage for Frida -->
+## Telemetry Overview
+- Stack: Prometheus (scrape), Grafana (dashboards), cAdvisor (container CPU/Mem/IO), Postgres Exporter (DB stats), Rust metrics exporter (Prometheus text format).
+- Rust crates: `metrics`, `metrics-exporter-prometheus`.
+- Endpoints:
+  - Importer: `GET {importer.metrics_path}`
+  - Backend: `GET {backend.metrics_path}`
+  - Processor: serves `GET /metrics` on `{processor.metrics_address}`.
+
+## Configuration
+- `config/base.yaml`:
+  - `importer.metrics_path: /metrics`
+  - `backend.metrics_path: /metrics`
+  - `processor.metrics_address: 0.0.0.0:9100`
+- Override in `config/dev.yaml` or `config/production.yaml` if needed.
+
+## Metric Names
+- Counters
+  - `frida_import_total{status}`
+  - `frida_process_total{kind,status}` where `kind` in `process|recalc`
+- Histograms (seconds)
+  - `frida_import_duration_seconds{stage}`
+  - `frida_processing_stage_seconds{stage}`
+  - `frida_recalc_stage_seconds{stage}`
+  - `frida_backend_filter_seconds{op}`
+- Gauges
+  - `frida_processor_threads`
+
+## Buckets (configured in code)
+- importer: `[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]`
+- processing/recalc: `[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5]`
+- backend filter: `[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]`
+
+## Instrumentation Points
+- Importer (`processing/src/importer.rs`):
+  - `frida_import_duration_seconds{stage="insert_transaction|enqueue|total"}`
+  - `frida_import_total{status="ok|error"}`
+- Processor (`processing/src/processor.rs`):
+  - `frida_processing_stage_seconds{stage="matching_extract|matching_save|fetch_connected|fetch_direct|features_simple_extract|features_graph_extract|features_save|score_and_save|mark_processed|process_total"}`
+  - `frida_recalc_stage_seconds{stage="fetch_connected|fetch_direct|recalc_graph_extract|features_save|score_and_save|recalc_total"}`
+  - `frida_process_total{kind="process|recalc",status="ok|error"}`
+  - `frida_processor_threads` gauge set from `processor.threads`
+- Backend GraphQL (`processing/src/graphql/mod.rs`):
+  - `frida_backend_filter_seconds{op="filter_transactions"}`
+
+## Prometheus
+- Config files:
+  - `prometheus/prometheus.yml` (containers)
+  - `prometheus/prometheus-dev.yml` (local host)
+- Targets include: importer, backend, processor, cadvisor, postgres-exporter.
+
+## Grafana
+- Provisioned datasource(s):
+  - `Prometheus` → `http://prometheus:9090`
+  - `Prometheus-Dev` → `http://prometheus-dev:9090`
+- Dashboard: `grafana/provisioning/dashboards/frida.json`
+  - Panels:
+    - Imported total, rates (p50/p75/p95/p99), durations (p50/p75/p95/p99)
+    - Processing totals/rates/durations
+    - Recalc totals/rates/durations
+    - Processor threads gauge
+    - CPU/Mem/IO per service (cAdvisor)
+
+## Operations
+- Start stack:
+  - Prod compose: `docker compose up -d`
+  - Dev compose: `docker compose -f docker-compose-dev.yml up -d`
+- Access:
+  - Prometheus: `http://localhost:9090` (prod), `http://localhost:9091` (dev)
+  - Grafana: `http://localhost:3001` (prod), `http://localhost:3002` (dev)
+- Notes:
+  - Ensure services expose metrics endpoints (importer/backend/processor).
+  - For local runs, Prometheus-dev scrapes `host.docker.internal`.
+  - Secure Grafana/Prometheus before internet exposure.
+
