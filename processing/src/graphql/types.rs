@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use async_graphql::dynamic::TypeRef;
 pub use crate::model::processible::ColumnScalar;
+use async_graphql::dynamic::TypeRef;
+use std::collections::HashMap;
 
 pub type ColumnTypeIndex = HashMap<String, ColumnScalar>;
 
@@ -36,5 +36,3 @@ pub fn base_scalar_for_ops(s: &ColumnScalar) -> ColumnScalar {
         ColumnScalar::Boolean => ColumnScalar::Boolean,
     }
 }
-
-

@@ -3,7 +3,7 @@ use std::error::Error;
 use async_trait::async_trait;
 use processing::model::{ProcessibleSerde, processible::ColumnFilter};
 
-use crate::model::{EcomOrder};
+use crate::model::EcomOrder;
 
 #[async_trait]
 impl ProcessibleSerde for EcomOrder {

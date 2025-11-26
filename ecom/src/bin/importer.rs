@@ -5,9 +5,7 @@ use processing::{
     queue::ProdQueue,
 };
 
-use ecom::{
-    model::EcomOrder,
-};
+use ecom::model::EcomOrder;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {

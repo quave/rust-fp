@@ -1,0 +1,11 @@
+- [ ] Replace sqlx to seq_orm
+- [ ] Real ecom model
+- [ ] Real model indices
+- [ ] Deploy and test
+- [ ] Adjust grafana board
+- [ ] Check and fix sql injections
+- [ ] Split common storage implementation
+- [ ] Common features
+- [ ] Remove unnecessery methods from processible
+- [ ] ProcessibleSerde to serde
+- [ ] All the entities to graphql

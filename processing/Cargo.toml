@@ -13,14 +13,6 @@ serde_json = { workspace = true }
 serde_yml = { workspace = true }
 dotenvy = { workspace = true }
 tokio = { workspace = true }
-sqlx = { workspace = true, features = [
-    "runtime-tokio",
-    "tls-native-tls",
-    "postgres",
-    "chrono",
-    "uuid",
-    "json"
-]}
 sea-orm = { workspace = true }
 seaography = { workspace = true }
 tracing = { workspace = true }

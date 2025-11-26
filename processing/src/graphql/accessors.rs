@@ -34,12 +34,15 @@ pub fn access_array(accessor: ValueAccessor) -> Vec<String> {
     let list_acc: ListAccessor = accessor
         .list()
         .expect("Failed to get list in graphql schema.");
-    
-    list_acc.iter().map(|v| {
-        v.string()
-        .expect("Failed to convert list element to string in graphql schema.")
-        .to_string()
-    }).collect::<Vec<String>>()
+
+    list_acc
+        .iter()
+        .map(|v| {
+            v.string()
+                .expect("Failed to convert list element to string in graphql schema.")
+                .to_string()
+        })
+        .collect::<Vec<String>>()
 }
 
 pub fn access_list_by<T, F: Fn(ValueAccessor) -> T>(accessor: ValueAccessor, f: F) -> Vec<T> {
@@ -48,5 +51,3 @@ pub fn access_list_by<T, F: Fn(ValueAccessor) -> T>(accessor: ValueAccessor, f: 
         .expect("Failed to get list in graphql schema.");
     list_acc.iter().map(|v| f(v)).collect::<Vec<T>>()
 }
-
-

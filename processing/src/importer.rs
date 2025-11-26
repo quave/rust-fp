@@ -16,10 +16,7 @@ pub struct Importer<P: Processible + ProcessibleSerde> {
 }
 
 impl<P: Processible + ProcessibleSerde> Importer<P> {
-    pub fn new(
-        storage: Arc<dyn CommonStorage>,
-        queue: Arc<dyn QueueService>,
-    ) -> Self {
+    pub fn new(storage: Arc<dyn CommonStorage>, queue: Arc<dyn QueueService>) -> Self {
         tracing::info!("Initializing new Importer");
         Self {
             storage,

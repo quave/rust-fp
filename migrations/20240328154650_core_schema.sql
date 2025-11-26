@@ -24,21 +24,30 @@ CREATE INDEX IF NOT EXISTS idx_labels_label_source ON labels(label_source);
 
 CREATE TABLE IF NOT EXISTS transactions (
     id BIGSERIAL PRIMARY KEY,
-    payload_number TEXT NOT NULL UNIQUE,
+    payload_number TEXT NOT NULL,
+    transaction_version INTEGER NOT NULL DEFAULT 1,
+    is_latest BOOLEAN NOT NULL DEFAULT TRUE,
     payload JSONB NOT NULL,
-    schema_version_major INTEGER NOT NULL,
-    schema_version_minor INTEGER NOT NULL,
+    schema_version_major INTEGER NOT NULL default 1,
+    schema_version_minor INTEGER NOT NULL default 0,
     label_id BIGINT NULL,
     comment TEXT NULL,
     last_scoring_date TIMESTAMP NULL,
     processing_complete BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+    FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE,
+    UNIQUE (payload_number, transaction_version)
 );
+CREATE INDEX IF NOT EXISTS idx_transactions_payload_number ON transactions(payload_number);
+CREATE INDEX IF NOT EXISTS idx_transactions_is_latest ON transactions(is_latest);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
 CREATE INDEX IF NOT EXISTS idx_transactions_label_id ON transactions(label_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_last_scoring_date ON transactions(last_scoring_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_processing_complete ON transactions(processing_complete);
+CREATE INDEX IF NOT EXISTS idx_transactions_payload_number ON transactions(payload_number);
+CREATE INDEX IF NOT EXISTS idx_transactions_is_latest ON transactions(is_latest);
+
 
 CREATE TABLE IF NOT EXISTS scoring_models (
     id BIGSERIAL PRIMARY KEY,
@@ -121,7 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_triggered_rules_rule_id ON triggered_rules(rule_i
 CREATE TABLE IF NOT EXISTS features (
     id BIGSERIAL PRIMARY KEY,
     transaction_id BIGINT NOT NULL,
-    transaction_version INT NOT NULL,
     schema_version_major INTEGER NOT NULL,
     schema_version_minor INTEGER NOT NULL,
     simple_features JSONB,
@@ -129,9 +137,8 @@ CREATE TABLE IF NOT EXISTS features (
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_features_transaction_id_version ON features(transaction_id, transaction_version);
-CREATE INDEX IF NOT EXISTS idx_features_transaction_id ON features(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_features_created_at ON features(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_features_transaction_id ON features(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_features_schema_version_major_minor ON features(schema_version_major, schema_version_minor);
 
 CREATE TABLE IF NOT EXISTS processing_queue (

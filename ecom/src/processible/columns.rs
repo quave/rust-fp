@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use async_graphql::Value;
-use processing::{model::processible::{ColumnFilter, ColumnScalar, FilterOperator}, graphql::types::scalar_base_type_name};
+use processing::{
+    graphql::types::scalar_base_type_name,
+    model::processible::{ColumnFilter, ColumnScalar, FilterOperator},
+};
 
-use crate::model::{EcomOrder};
+use crate::model::EcomOrder;
 
-lazy_static::lazy_static!{
+lazy_static::lazy_static! {
 
     pub(crate) static ref COLUMNS: Vec<ColumnFilter<EcomOrder>> = vec![
         ColumnFilter {
@@ -14,7 +17,7 @@ lazy_static::lazy_static!{
             scalar: ColumnScalar::String,
             resolver: Arc::new(|order: &EcomOrder| Value::from(order.order_number.clone())),
             filter_statement: Some(Arc::new(|filter| format!(
-                "payload->>'order_number' {}", 
+                "payload->>'order_number' {}",
                 filter.operator_value.to_plain_statement(scalar_base_type_name(&ColumnScalar::String)),
             ))),
         },
@@ -24,7 +27,7 @@ lazy_static::lazy_static!{
             scalar: ColumnScalar::String,
             resolver: Arc::new(|order: &EcomOrder| Value::from(order.created_at.to_string())),
             filter_statement: Some(Arc::new(|filter| format!(
-                "payload->'created_at'::datetime {}", 
+                "payload->'created_at'::datetime {}",
                 filter.operator_value.to_plain_statement(scalar_base_type_name(&ColumnScalar::String)),
             ))),
         },
@@ -34,7 +37,7 @@ lazy_static::lazy_static!{
             scalar: ColumnScalar::String,
             resolver: Arc::new(|order: &EcomOrder| Value::from(order.billing.payment_type.clone())),
             filter_statement: Some(Arc::new(|filter| format!(
-                "payload->'billing'->>'payment_type' {}", 
+                "payload->'billing'->>'payment_type' {}",
                 filter.operator_value.to_plain_statement(scalar_base_type_name(&ColumnScalar::String)),
             ))),
         },
@@ -44,7 +47,7 @@ lazy_static::lazy_static!{
             scalar: ColumnScalar::String,
             resolver: Arc::new(|order: &EcomOrder| Value::from(order.billing.payment_details.clone())),
             filter_statement: Some(Arc::new(|filter| format!(
-                "payload->'billing'->>'payment_details' {}", 
+                "payload->'billing'->>'payment_details' {}",
                 filter.operator_value.to_plain_statement(scalar_base_type_name(&ColumnScalar::String)),
             ))),
         },
@@ -54,7 +57,7 @@ lazy_static::lazy_static!{
             scalar: ColumnScalar::String,
             resolver: Arc::new(|order: &EcomOrder| Value::from(order.billing.billing_address.clone())),
             filter_statement: Some(Arc::new(|filter| format!(
-                "payload->'billing'->>'billing_address' {}", 
+                "payload->'billing'->>'billing_address' {}",
                 filter.operator_value.to_plain_statement(scalar_base_type_name(&ColumnScalar::String)),
             ))),
         },
@@ -107,7 +110,7 @@ lazy_static::lazy_static!{
             scalar: ColumnScalar::String,
             resolver: Arc::new(|order: &EcomOrder| Value::from(order.customer.name.clone())),
             filter_statement: Some(Arc::new(|filter| format!(
-                "payload->'customer'->>'name' {}", 
+                "payload->'customer'->>'name' {}",
                 filter.operator_value.to_plain_statement(scalar_base_type_name(&ColumnScalar::String)),
             ))),
         },
@@ -117,7 +120,7 @@ lazy_static::lazy_static!{
             scalar: ColumnScalar::String,
             resolver: Arc::new(|order: &EcomOrder| Value::from(order.customer.email.clone())),
             filter_statement: Some(Arc::new(|filter| format!(
-                "payload->'customer'->>'email' {}", 
+                "payload->'customer'->>'email' {}",
                 filter.operator_value.to_plain_statement(scalar_base_type_name(&ColumnScalar::String)),
             ))),
         },

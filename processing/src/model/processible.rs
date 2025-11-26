@@ -1,15 +1,15 @@
 use std::error::Error;
-use std::fmt::{Debug};
+use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_graphql::dynamic::{TypeRef};
+use crate::model::Feature;
+use crate::model::{ConnectedTransaction, DirectConnection, MatchingField};
 use async_graphql::Value;
+use async_graphql::dynamic::TypeRef;
 use async_trait::async_trait;
 use seaography::itertools::Itertools;
-use crate::model::{ConnectedTransaction, DirectConnection, MatchingField};
-use crate::model::Feature;
-use strum_macros::Display as MacrosDisplay;
 use std::fmt::Display;
+use strum_macros::Display as MacrosDisplay;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ColumnScalar {
@@ -41,11 +41,7 @@ pub trait Processible: Send + Sync + Clone + 'static {
 
 pub trait ColumnValueTrait: Display + Send + Sync + 'static {}
 
-impl<T> ColumnValueTrait for T
-where
-    T: Display + Send + Sync + 'static,
-{}
-
+impl<T> ColumnValueTrait for T where T: Display + Send + Sync + 'static {}
 
 #[derive(Debug, Clone)]
 pub struct Filter<T: ColumnValueTrait> {
@@ -59,7 +55,8 @@ pub struct ColumnFilter<P: Processible> {
     pub help_text: String,
     pub scalar: ColumnScalar,
     pub resolver: Arc<dyn (Fn(&P) -> Value) + Send + Sync>,
-    pub filter_statement: Option<Arc<dyn Fn(&Filter<Box<dyn ColumnValueTrait>>) -> String + Send + Sync>>,
+    pub filter_statement:
+        Option<Arc<dyn Fn(&Filter<Box<dyn ColumnValueTrait>>) -> String + Send + Sync>>,
 }
 
 #[async_trait]
@@ -67,10 +64,9 @@ pub struct ColumnFilter<P: Processible> {
 pub trait ProcessibleSerde: Processible + serde::de::DeserializeOwned {
     fn as_json(&self) -> Result<serde_json::Value, Box<dyn Error + Send + Sync>>;
     fn from_json(json: serde_json::Value) -> Result<Self, Box<dyn Error + Send + Sync>>;
-    
+
     fn list_column_fields() -> Vec<ColumnFilter<Self>>;
 }
-
 
 #[derive(MacrosDisplay, Debug, Clone)]
 pub enum FilterOperator<T: ColumnValueTrait> {
@@ -103,51 +99,123 @@ pub enum FilterOperator<T: ColumnValueTrait> {
 impl<T: ColumnValueTrait> FilterOperator<T> {
     pub fn to_plain_statement(&self, tpe: &str) -> String {
         match self {
-            FilterOperator::Equal(v) => if tpe == TypeRef::STRING { format!("= '{}'", v.to_string()) } else { format!("= {}", v.to_string()) },
-            FilterOperator::NotEqual(v) => if tpe == TypeRef::STRING { format!("!= '{}'", v.to_string()) } else { format!("!= {}", v.to_string()) },
+            FilterOperator::Equal(v) => {
+                if tpe == TypeRef::STRING {
+                    format!("= '{}'", v.to_string())
+                } else {
+                    format!("= {}", v.to_string())
+                }
+            }
+            FilterOperator::NotEqual(v) => {
+                if tpe == TypeRef::STRING {
+                    format!("!= '{}'", v.to_string())
+                } else {
+                    format!("!= {}", v.to_string())
+                }
+            }
             FilterOperator::GreaterThan(v) => format!("> {}", v.to_string()),
             FilterOperator::GreaterThanOrEqual(v) => format!(">= {}", v.to_string()),
             FilterOperator::LessThan(v) => format!("< {}", v.to_string()),
             FilterOperator::LessThanOrEqual(v) => format!("<= {}", v.to_string()),
-            FilterOperator::Between(v1, v2) => if tpe == TypeRef::STRING { format!("between '{}' and '{}'", v1.to_string(), v2.to_string()) } else { format!("between {} and {}", v1.to_string(), v2.to_string()) },
+            FilterOperator::Between(v1, v2) => {
+                if tpe == TypeRef::STRING {
+                    format!("between '{}' and '{}'", v1.to_string(), v2.to_string())
+                } else {
+                    format!("between {} and {}", v1.to_string(), v2.to_string())
+                }
+            }
             FilterOperator::IsNull => format!("is null"),
             FilterOperator::NotNull => format!("is not null"),
             FilterOperator::Contains(v) => format!("%{}%", v.to_string()),
-            FilterOperator::In(v) => if tpe == TypeRef::STRING { 
-                format!("in ({})", v.iter().map(|v| format!("'{}'", v.to_string())).join(", ")) 
-            } else { 
-                format!("in ({})", v.iter().map(|v| format!("{}", v.to_string())).join(", ")) 
-            },
-            FilterOperator::NotIn(v) => if tpe == TypeRef::STRING { 
-                format!("not in ({})", v.iter().map(|v| format!("'{}'", v.to_string())).join(", ")) 
-            } else { 
-                format!("not in ({})", v.iter().map(|v| format!("{}", v.to_string())).join(", ")) 
-            },
+            FilterOperator::In(v) => {
+                if tpe == TypeRef::STRING {
+                    format!(
+                        "in ({})",
+                        v.iter().map(|v| format!("'{}'", v.to_string())).join(", ")
+                    )
+                } else {
+                    format!(
+                        "in ({})",
+                        v.iter().map(|v| format!("{}", v.to_string())).join(", ")
+                    )
+                }
+            }
+            FilterOperator::NotIn(v) => {
+                if tpe == TypeRef::STRING {
+                    format!(
+                        "not in ({})",
+                        v.iter().map(|v| format!("'{}'", v.to_string())).join(", ")
+                    )
+                } else {
+                    format!(
+                        "not in ({})",
+                        v.iter().map(|v| format!("{}", v.to_string())).join(", ")
+                    )
+                }
+            }
         }
     }
 
     pub fn to_json_path_statement(&self, tpe: &str) -> String {
         match self {
-            FilterOperator::Equal(v) => if tpe == TypeRef::STRING { format!("= \"{}\"", v.to_string()) } else { format!("= {}", v.to_string()) },
-            FilterOperator::NotEqual(v) => if tpe == TypeRef::STRING { format!("!= \"{}\"", v.to_string()) } else { format!("!= {}", v.to_string()) },
+            FilterOperator::Equal(v) => {
+                if tpe == TypeRef::STRING {
+                    format!("= \"{}\"", v.to_string())
+                } else {
+                    format!("= {}", v.to_string())
+                }
+            }
+            FilterOperator::NotEqual(v) => {
+                if tpe == TypeRef::STRING {
+                    format!("!= \"{}\"", v.to_string())
+                } else {
+                    format!("!= {}", v.to_string())
+                }
+            }
             FilterOperator::GreaterThan(v) => format!("> {}", v.to_string()),
             FilterOperator::GreaterThanOrEqual(v) => format!(">= {}", v.to_string()),
             FilterOperator::LessThan(v) => format!("< {}", v.to_string()),
             FilterOperator::LessThanOrEqual(v) => format!("<= {}", v.to_string()),
-            FilterOperator::Between(v1, v2) => if tpe == TypeRef::STRING { format!("between \"{}\" and \"{}\"", v1.to_string(), v2.to_string()) } else { format!("between {} and {}", v1.to_string(), v2.to_string()) },
+            FilterOperator::Between(v1, v2) => {
+                if tpe == TypeRef::STRING {
+                    format!("between \"{}\" and \"{}\"", v1.to_string(), v2.to_string())
+                } else {
+                    format!("between {} and {}", v1.to_string(), v2.to_string())
+                }
+            }
             FilterOperator::IsNull => format!("is null"),
             FilterOperator::NotNull => format!("is not null"),
             FilterOperator::Contains(v) => format!("%{}%", v.to_string()),
-            FilterOperator::In(v) => if tpe == TypeRef::STRING { 
-                format!("in ({})", v.iter().map(|v| format!("\"{}\"", v.to_string())).join(", ")) 
-            } else { 
-                format!("in ({})", v.iter().map(|v| format!("{}", v.to_string())).join(", ")) 
-            },
-            FilterOperator::NotIn(v) => if tpe == TypeRef::STRING { 
-                format!("not in ({})", v.iter().map(|v| format!("\"{}\"", v.to_string())).join(", ")) 
-            } else {
-                format!("not in ({})", v.iter().map(|v| format!("{}", v.to_string())).join(", ")) 
-            },
+            FilterOperator::In(v) => {
+                if tpe == TypeRef::STRING {
+                    format!(
+                        "in ({})",
+                        v.iter()
+                            .map(|v| format!("\"{}\"", v.to_string()))
+                            .join(", ")
+                    )
+                } else {
+                    format!(
+                        "in ({})",
+                        v.iter().map(|v| format!("{}", v.to_string())).join(", ")
+                    )
+                }
+            }
+            FilterOperator::NotIn(v) => {
+                if tpe == TypeRef::STRING {
+                    format!(
+                        "not in ({})",
+                        v.iter()
+                            .map(|v| format!("\"{}\"", v.to_string()))
+                            .join(", ")
+                    )
+                } else {
+                    format!(
+                        "not in ({})",
+                        v.iter().map(|v| format!("{}", v.to_string())).join(", ")
+                    )
+                }
+            }
         }
     }
 }

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   importer:
     build:
@@ -41,7 +39,8 @@ services:
       - db
 
   db:
-    image: postgres:16
+    image: postgis/postgis:16-3.5
+    platform: linux/amd64
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -50,6 +49,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d frida" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   prometheus:
     image: prom/prometheus:latest

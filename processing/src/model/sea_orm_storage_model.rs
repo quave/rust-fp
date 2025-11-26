@@ -1,10 +1,10 @@
+use chrono::{DateTime, NaiveDateTime, Utc};
+use evalexpr::Value as EvalValue;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
-use chrono::{NaiveDateTime, DateTime, Utc};
-use evalexpr::Value as EvalValue;
 
-use crate::model::{FeatureValue, ScoringModelType, FraudLevel, LabelSource};
- 
+use crate::model::{FeatureValue, FraudLevel, LabelSource, ScoringModelType};
+
 impl Into<EvalValue> for FeatureValue {
     fn into(self) -> EvalValue {
         match self {
@@ -13,10 +13,18 @@ impl Into<EvalValue> for FeatureValue {
             FeatureValue::String(v) => EvalValue::String(v),
             FeatureValue::Bool(v) => EvalValue::Boolean(v),
             FeatureValue::DateTime(v) => EvalValue::Int(v.timestamp_millis()),
-            FeatureValue::IntList(v) => EvalValue::Tuple(v.into_iter().map(|x| EvalValue::Int(x)).collect()),
-            FeatureValue::DoubleList(v) => EvalValue::Tuple(v.into_iter().map(|x| EvalValue::Float(x)).collect()),
-            FeatureValue::StringList(v) => EvalValue::Tuple(v.into_iter().map(|x| EvalValue::String(x)).collect()),
-            FeatureValue::BoolList(v) => EvalValue::Tuple(v.into_iter().map(|x| EvalValue::Boolean(x)).collect()),
+            FeatureValue::IntList(v) => {
+                EvalValue::Tuple(v.into_iter().map(|x| EvalValue::Int(x)).collect())
+            }
+            FeatureValue::DoubleList(v) => {
+                EvalValue::Tuple(v.into_iter().map(|x| EvalValue::Float(x)).collect())
+            }
+            FeatureValue::StringList(v) => {
+                EvalValue::Tuple(v.into_iter().map(|x| EvalValue::String(x)).collect())
+            }
+            FeatureValue::BoolList(v) => {
+                EvalValue::Tuple(v.into_iter().map(|x| EvalValue::Boolean(x)).collect())
+            }
         }
     }
 }
@@ -102,47 +110,103 @@ impl<'de> Deserialize<'de> for FeatureValue {
 
         let helper = FeatureValueHelper::deserialize(deserializer)?;
         match helper.type_.as_str() {
-            "integer" => Ok(FeatureValue::Int(helper.value.as_i64().ok_or_else(|| D::Error::custom("invalid integer"))?)),
-            "double" => Ok(FeatureValue::Double(helper.value.as_f64().ok_or_else(|| D::Error::custom("invalid double"))?)),
-            "string" => Ok(FeatureValue::String(helper.value.as_str().ok_or_else(|| D::Error::custom("invalid string"))?.to_string())),
-            "boolean" => Ok(FeatureValue::Bool(helper.value.as_bool().ok_or_else(|| D::Error::custom("invalid boolean"))?)),
+            "integer" => Ok(FeatureValue::Int(
+                helper
+                    .value
+                    .as_i64()
+                    .ok_or_else(|| D::Error::custom("invalid integer"))?,
+            )),
+            "double" => Ok(FeatureValue::Double(
+                helper
+                    .value
+                    .as_f64()
+                    .ok_or_else(|| D::Error::custom("invalid double"))?,
+            )),
+            "string" => Ok(FeatureValue::String(
+                helper
+                    .value
+                    .as_str()
+                    .ok_or_else(|| D::Error::custom("invalid string"))?
+                    .to_string(),
+            )),
+            "boolean" => Ok(FeatureValue::Bool(
+                helper
+                    .value
+                    .as_bool()
+                    .ok_or_else(|| D::Error::custom("invalid boolean"))?,
+            )),
             "datetime" => {
-                let datetime_str = helper.value.as_str().ok_or_else(|| D::Error::custom("invalid datetime string"))?;
-                Ok(FeatureValue::DateTime(DateTime::parse_from_rfc3339(datetime_str).map_err(D::Error::custom)?.with_timezone(&Utc)))
+                let datetime_str = helper
+                    .value
+                    .as_str()
+                    .ok_or_else(|| D::Error::custom("invalid datetime string"))?;
+                Ok(FeatureValue::DateTime(
+                    DateTime::parse_from_rfc3339(datetime_str)
+                        .map_err(D::Error::custom)?
+                        .with_timezone(&Utc),
+                ))
             }
             "integer_array" => {
-                let array = helper.value.as_array().ok_or_else(|| D::Error::custom("invalid array"))?;
+                let array = helper
+                    .value
+                    .as_array()
+                    .ok_or_else(|| D::Error::custom("invalid array"))?;
                 let mut result = Vec::new();
                 for v in array {
-                    result.push(v.as_i64().ok_or_else(|| D::Error::custom("invalid integer in array"))?);
+                    result.push(
+                        v.as_i64()
+                            .ok_or_else(|| D::Error::custom("invalid integer in array"))?,
+                    );
                 }
                 Ok(FeatureValue::IntList(result))
             }
             "double_array" => {
-                let array = helper.value.as_array().ok_or_else(|| D::Error::custom("invalid array"))?;
+                let array = helper
+                    .value
+                    .as_array()
+                    .ok_or_else(|| D::Error::custom("invalid array"))?;
                 let mut result = Vec::new();
                 for v in array {
-                    result.push(v.as_f64().ok_or_else(|| D::Error::custom("invalid double in array"))?);
+                    result.push(
+                        v.as_f64()
+                            .ok_or_else(|| D::Error::custom("invalid double in array"))?,
+                    );
                 }
                 Ok(FeatureValue::DoubleList(result))
             }
             "string_array" => {
-                let array = helper.value.as_array().ok_or_else(|| D::Error::custom("invalid array"))?;
+                let array = helper
+                    .value
+                    .as_array()
+                    .ok_or_else(|| D::Error::custom("invalid array"))?;
                 let mut result = Vec::new();
                 for v in array {
-                    result.push(v.as_str().ok_or_else(|| D::Error::custom("invalid string in array"))?.to_string());
+                    result.push(
+                        v.as_str()
+                            .ok_or_else(|| D::Error::custom("invalid string in array"))?
+                            .to_string(),
+                    );
                 }
                 Ok(FeatureValue::StringList(result))
             }
             "boolean_array" => {
-                let array = helper.value.as_array().ok_or_else(|| D::Error::custom("invalid array"))?;
+                let array = helper
+                    .value
+                    .as_array()
+                    .ok_or_else(|| D::Error::custom("invalid array"))?;
                 let mut result = Vec::new();
                 for v in array {
-                    result.push(v.as_bool().ok_or_else(|| D::Error::custom("invalid boolean in array"))?);
+                    result.push(
+                        v.as_bool()
+                            .ok_or_else(|| D::Error::custom("invalid boolean in array"))?,
+                    );
                 }
                 Ok(FeatureValue::BoolList(result))
             }
-            _ => Err(D::Error::custom(format!("unknown feature value type: {}", helper.type_))),
+            _ => Err(D::Error::custom(format!(
+                "unknown feature value type: {}",
+                helper.type_
+            ))),
         }
     }
 }
@@ -169,7 +233,9 @@ impl Serialize for Feature {
         map.serialize_entry("name", &self.name)?;
         // Get type and value from FeatureValue
         let value_json = serde_json::to_value(&*self.value).map_err(serde::ser::Error::custom)?;
-        let value_obj = value_json.as_object().ok_or_else(|| serde::ser::Error::custom("invalid value"))?;
+        let value_obj = value_json
+            .as_object()
+            .ok_or_else(|| serde::ser::Error::custom("invalid value"))?;
         if let Some(type_val) = value_obj.get("type") {
             map.serialize_entry("type", type_val)?;
         }
@@ -199,8 +265,7 @@ impl<'de> Deserialize<'de> for Feature {
             "type": helper.type_,
             "value": helper.value
         });
-        let value = serde_json::from_value(feature_value)
-            .map_err(serde::de::Error::custom)?;
+        let value = serde_json::from_value(feature_value).map_err(serde::de::Error::custom)?;
         Ok(Feature {
             name: helper.name,
             value: Box::new(value),
@@ -232,7 +297,9 @@ pub mod label {
     }
 
     impl Related<super::transaction::Entity> for Entity {
-        fn to() -> RelationDef { Relation::Transaction.def() }
+        fn to() -> RelationDef {
+            Relation::Transaction.def()
+        }
     }
 
     impl ActiveModelBehavior for ActiveModel {}
@@ -248,6 +315,8 @@ pub mod transaction {
         #[sea_orm(primary_key)]
         pub id: i64,
         pub payload_number: String,
+        pub transaction_version: i32,
+        pub is_latest: bool,
         pub payload: serde_json::Value,
         pub schema_version_major: i32,
         pub schema_version_minor: i32,
@@ -256,11 +325,16 @@ pub mod transaction {
         pub last_scoring_date: Option<NaiveDateTime>,
         pub processing_complete: bool,
         pub created_at: NaiveDateTime,
+        pub updated_at: NaiveDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::label::Entity", from = "Column::LabelId", to = "super::label::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::label::Entity",
+            from = "Column::LabelId",
+            to = "super::label::Column::Id"
+        )]
         Label,
         #[sea_orm(has_many = "super::scoring_event::Entity")]
         ScoringEvent,
@@ -271,15 +345,21 @@ pub mod transaction {
     }
 
     impl Related<super::label::Entity> for Entity {
-        fn to() -> RelationDef { Relation::Label.def() }
+        fn to() -> RelationDef {
+            Relation::Label.def()
+        }
     }
 
     impl Related<super::scoring_event::Entity> for Entity {
-        fn to() -> RelationDef { Relation::ScoringEvent.def() }
+        fn to() -> RelationDef {
+            Relation::ScoringEvent.def()
+        }
     }
 
     impl Related<super::feature::Entity> for Entity {
-        fn to() -> RelationDef { Relation::Feature.def() }
+        fn to() -> RelationDef {
+            Relation::Feature.def()
+        }
     }
 
     impl ActiveModelBehavior for ActiveModel {}
@@ -312,9 +392,21 @@ pub mod scoring_model {
         ChannelModelActivation,
     }
 
-    impl Related<super::channel::Entity> for Entity { fn to() -> RelationDef { Relation::Channel.def() } }
-    impl Related<super::expression_rule::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringRule.def() } }
-    impl Related<super::channel_model_activation::Entity> for Entity { fn to() -> RelationDef { Relation::ChannelModelActivation.def() } }
+    impl Related<super::channel::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::Channel.def()
+        }
+    }
+    impl Related<super::expression_rule::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ScoringRule.def()
+        }
+    }
+    impl Related<super::channel_model_activation::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ChannelModelActivation.def()
+        }
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -335,14 +427,26 @@ pub mod channel {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::scoring_model::Entity", from = "Column::ModelId", to = "super::scoring_model::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::scoring_model::Entity",
+            from = "Column::ModelId",
+            to = "super::scoring_model::Column::Id"
+        )]
         Model,
         #[sea_orm(has_many = "super::channel_model_activation::Entity")]
         ChannelModelActivation,
     }
 
-    impl Related<super::scoring_model::Entity> for Entity { fn to() -> RelationDef { Relation::Model.def() } }
-    impl Related<super::channel_model_activation::Entity> for Entity { fn to() -> RelationDef { Relation::ChannelModelActivation.def() } }
+    impl Related<super::scoring_model::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::Model.def()
+        }
+    }
+    impl Related<super::channel_model_activation::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ChannelModelActivation.def()
+        }
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -364,17 +468,37 @@ pub mod scoring_event {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::transaction::Entity", from = "Column::TransactionId", to = "super::transaction::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::transaction::Entity",
+            from = "Column::TransactionId",
+            to = "super::transaction::Column::Id"
+        )]
         Transaction,
-        #[sea_orm(belongs_to = "super::channel_model_activation::Entity", from = "Column::ActivationId", to = "super::channel_model_activation::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::channel_model_activation::Entity",
+            from = "Column::ActivationId",
+            to = "super::channel_model_activation::Column::Id"
+        )]
         ChannelModelActivation,
         #[sea_orm(has_many = "super::triggered_rule::Entity")]
         TriggeredRule,
     }
 
-    impl Related<super::transaction::Entity> for Entity { fn to() -> RelationDef { Relation::Transaction.def() } }
-    impl Related<super::channel_model_activation::Entity> for Entity { fn to() -> RelationDef { Relation::ChannelModelActivation.def() } }
-    impl Related<super::triggered_rule::Entity> for Entity { fn to() -> RelationDef { Relation::TriggeredRule.def() } }
+    impl Related<super::transaction::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::Transaction.def()
+        }
+    }
+    impl Related<super::channel_model_activation::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ChannelModelActivation.def()
+        }
+    }
+    impl Related<super::triggered_rule::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::TriggeredRule.def()
+        }
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -395,17 +519,37 @@ pub mod channel_model_activation {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::channel::Entity", from = "Column::ChannelId", to = "super::channel::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::channel::Entity",
+            from = "Column::ChannelId",
+            to = "super::channel::Column::Id"
+        )]
         Channel,
-        #[sea_orm(belongs_to = "super::scoring_model::Entity", from = "Column::ModelId", to = "super::scoring_model::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::scoring_model::Entity",
+            from = "Column::ModelId",
+            to = "super::scoring_model::Column::Id"
+        )]
         ScoringModel,
         #[sea_orm(has_many = "super::scoring_event::Entity")]
         ScoringEvent,
     }
 
-    impl Related<super::channel::Entity> for Entity { fn to() -> RelationDef { Relation::Channel.def() } }
-    impl Related<super::scoring_model::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringModel.def() } }
-    impl Related<super::scoring_event::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringEvent.def() } }
+    impl Related<super::channel::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::Channel.def()
+        }
+    }
+    impl Related<super::scoring_model::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ScoringModel.def()
+        }
+    }
+    impl Related<super::scoring_event::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ScoringEvent.def()
+        }
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -429,14 +573,26 @@ pub mod expression_rule {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::scoring_model::Entity", from = "Column::ModelId", to = "super::scoring_model::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::scoring_model::Entity",
+            from = "Column::ModelId",
+            to = "super::scoring_model::Column::Id"
+        )]
         Model,
         #[sea_orm(has_many = "super::triggered_rule::Entity")]
         TriggeredRule,
     }
 
-    impl Related<super::scoring_model::Entity> for Entity { fn to() -> RelationDef { Relation::Model.def() } }
-    impl Related<super::triggered_rule::Entity> for Entity { fn to() -> RelationDef { Relation::TriggeredRule.def() } }
+    impl Related<super::scoring_model::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::Model.def()
+        }
+    }
+    impl Related<super::triggered_rule::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::TriggeredRule.def()
+        }
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -456,14 +612,30 @@ pub mod triggered_rule {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::scoring_event::Entity", from = "Column::ScoringEventsId", to = "super::scoring_event::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::scoring_event::Entity",
+            from = "Column::ScoringEventsId",
+            to = "super::scoring_event::Column::Id"
+        )]
         ScoringEvent,
-        #[sea_orm(belongs_to = "super::expression_rule::Entity", from = "Column::RuleId", to = "super::expression_rule::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::expression_rule::Entity",
+            from = "Column::RuleId",
+            to = "super::expression_rule::Column::Id"
+        )]
         ScoringRule,
     }
 
-    impl Related<super::scoring_event::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringEvent.def() } }
-    impl Related<super::expression_rule::Entity> for Entity { fn to() -> RelationDef { Relation::ScoringRule.def() } }
+    impl Related<super::scoring_event::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ScoringEvent.def()
+        }
+    }
+    impl Related<super::expression_rule::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::ScoringRule.def()
+        }
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
@@ -478,7 +650,6 @@ pub mod feature {
         #[sea_orm(primary_key)]
         pub id: i64,
         pub transaction_id: i64,
-        pub transaction_version: i32,
         pub schema_version_major: i32,
         pub schema_version_minor: i32,
         pub simple_features: Option<serde_json::Value>,
@@ -488,11 +659,19 @@ pub mod feature {
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::transaction::Entity", from = "Column::TransactionId", to = "super::transaction::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::transaction::Entity",
+            from = "Column::TransactionId",
+            to = "super::transaction::Column::Id"
+        )]
         Transaction,
     }
 
-    impl Related<super::transaction::Entity> for Entity { fn to() -> RelationDef { Relation::Transaction.def() } }
+    impl Related<super::transaction::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::Transaction.def()
+        }
+    }
     impl ActiveModelBehavior for ActiveModel {}
 }
 
@@ -569,20 +748,45 @@ pub mod match_node_transactions {
         pub node_id: i64,
         #[sea_orm(primary_key)]
         pub transaction_id: i64,
+        pub datetime_alpha: Option<NaiveDateTime>,
+        pub datetime_beta: Option<NaiveDateTime>,
+        pub long_alpha: Option<f64>,
+        pub lat_alpha: Option<f64>,
+        pub long_beta: Option<f64>,
+        pub lat_beta: Option<f64>,
+        pub long_gamma: Option<f64>,
+        pub lat_gamma: Option<f64>,
+        pub long_delta: Option<f64>,
+        pub lat_delta: Option<f64>,
+        pub created_at: NaiveDateTime,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {
-        #[sea_orm(belongs_to = "super::match_node::Entity", from = "Column::NodeId", to = "super::match_node::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::match_node::Entity",
+            from = "Column::NodeId",
+            to = "super::match_node::Column::Id"
+        )]
         MatchNode,
-        #[sea_orm(belongs_to = "super::transaction::Entity", from = "Column::TransactionId", to = "super::transaction::Column::Id")]
+        #[sea_orm(
+            belongs_to = "super::transaction::Entity",
+            from = "Column::TransactionId",
+            to = "super::transaction::Column::Id"
+        )]
         Transaction,
     }
 
-    impl Related<super::match_node::Entity> for Entity { fn to() -> RelationDef { Relation::MatchNode.def() } }
-    impl Related<super::transaction::Entity> for Entity { fn to() -> RelationDef { Relation::Transaction.def() } }
+    impl Related<super::match_node::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::MatchNode.def()
+        }
+    }
+    impl Related<super::transaction::Entity> for Entity {
+        fn to() -> RelationDef {
+            Relation::Transaction.def()
+        }
+    }
 
     impl ActiveModelBehavior for ActiveModel {}
 }
-
-

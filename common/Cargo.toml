@@ -21,7 +21,7 @@ once_cell = { workspace = true }
 thiserror = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true }
-sqlx = { workspace = true }
+sea-orm = { workspace = true }
 async-trait = { workspace = true }
 mockall = { workspace = true, optional = true }
 

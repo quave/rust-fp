@@ -1,7 +1,9 @@
 use async_trait::async_trait;
-use processing::model::{ConnectedTransaction, DirectConnection, Feature, FeatureValue, MatchingField, Processible};
+use processing::model::{
+    ConnectedTransaction, DirectConnection, Feature, FeatureValue, MatchingField, Processible,
+};
 
-use crate::model::{EcomOrder};
+use crate::model::EcomOrder;
 
 #[async_trait]
 impl Processible for EcomOrder {
@@ -17,9 +19,7 @@ impl Processible for EcomOrder {
         (1, 0)
     }
 
-    fn extract_simple_features(
-        &self,
-    ) -> Vec<Feature> {
+    fn extract_simple_features(&self) -> Vec<Feature> {
         let mut features = Vec::new();
 
         // Count of items
@@ -53,7 +53,7 @@ impl Processible for EcomOrder {
             name: "created_at".to_string(),
             value: Box::new(FeatureValue::DateTime(
                 chrono::DateTime::from_timestamp(self.created_at.timestamp(), 0)
-                    .unwrap_or_else(|| chrono::Utc::now())
+                    .unwrap_or_else(|| chrono::Utc::now()),
             )),
         });
 
@@ -89,7 +89,7 @@ impl Processible for EcomOrder {
     fn extract_graph_features(
         &self,
         connected_transactions: &[ConnectedTransaction],
-        direct_connections: &[DirectConnection]
+        direct_connections: &[DirectConnection],
     ) -> Vec<Feature> {
         let mut features = Vec::new();
         // Add connection-related features
@@ -97,7 +97,7 @@ impl Processible for EcomOrder {
             name: "connected_transaction_count".to_string(),
             value: Box::new(FeatureValue::Int(connected_transactions.len() as i64)),
         });
-        
+
         features.push(Feature {
             name: "direct_connection_count".to_string(),
             value: Box::new(FeatureValue::Int(direct_connections.len() as i64)),
@@ -110,28 +110,30 @@ impl Processible for EcomOrder {
         let mut fields = Vec::new();
 
         // Add email matching field
-        fields.push(MatchingField {
-            matcher: "exact".to_string(),
-            value: self.customer.email.clone(),
-        });
+        fields.push(MatchingField::new_simple(
+            "customer.email".to_string(),
+            self.customer.email.clone(),
+        ));
 
         // Add customer name matching field
-        fields.push(MatchingField {
-            matcher: "exact".to_string(),
-            value: self.customer.name.clone(),
-        });
+        fields.push(MatchingField::new_simple(
+            "customer.name".to_string(),
+            self.customer.name.clone(),
+        ));
 
         // Add billing address matching field
-        fields.push(MatchingField {
-            matcher: "exact".to_string(),
-            value: self.billing.billing_address.clone(),
-        });
+        fields.push(MatchingField::new_with_timespace(
+            "billing.billing_address".to_string(),
+            self.billing.billing_address.clone(),
+            self.created_at,
+            (55.6, 33.4),
+        ));
 
         // Add payment details matching field (for similar payment methods)
-        fields.push(MatchingField {
-            matcher: "exact".to_string(),
-            value: self.billing.payment_details.clone(),
-        });
+        fields.push(MatchingField::new_simple(
+            "billing.payment_details".to_string(),
+            self.billing.payment_details.clone(),
+        ));
 
         fields
     }

@@ -1,13 +1,15 @@
+use chrono::Utc;
+use common::test_helpers::setup_test_environment;
 use processing::{
-    model::{ModelId, ProcessibleSerde},
+    model::{ModelId, ProcessibleSerde, sea_orm_storage_model as entities},
     storage::ProdCommonStorage,
 };
-use common::test_helpers::{setup_test_environment, create_test_pool};
+use sea_orm::ActiveModelTrait;
+use sea_orm::ActiveValue::{NotSet, Set};
 use serde_json::Value;
-use sqlx::PgPool;
 use std::error::Error;
-use tracing::debug;
 use tokio::sync::OnceCell;
+use tracing::debug;
 
 use crate::mocks::TestPayload;
 
@@ -16,23 +18,24 @@ static SETUP: OnceCell<()> = OnceCell::const_new();
 
 /// Ensures the test DB schema is initialized only once per test run.
 pub async fn ensure_setup() {
-    SETUP.get_or_init(|| async {
-        setup_test_environment().await.expect("Failed to setup test environment");
-    }).await;
+    SETUP
+        .get_or_init(|| async {
+            setup_test_environment()
+                .await
+                .expect("Failed to setup test environment");
+        })
+        .await;
 }
 
-// Helper to create a DB pool and storage, plus reset tables
-pub async fn get_test_storage() -> Result<(PgPool, ProdCommonStorage<TestPayload>), Box<dyn Error + Send + Sync>> {
+// Helper to create a storage instance backed by the test database
+pub async fn get_test_storage() -> Result<ProdCommonStorage<TestPayload>, Box<dyn Error + Send + Sync>> {
     ensure_setup().await;
-    let pool = create_test_pool().await?;
-    let storage = create_test_common_storage::<TestPayload>().await?;
-    // Note: No longer dropping tables here since it interferes with parallel tests
-    // The schema is set up once in ensure_setup() and shared across all tests
-    Ok((pool, storage))
+    create_test_common_storage::<TestPayload>().await
 }
 
 /// Create a common storage instance for testing
-async fn create_test_common_storage<P: ProcessibleSerde>() -> Result<ProdCommonStorage<P>, Box<dyn Error + Send + Sync>> {
+async fn create_test_common_storage<P: ProcessibleSerde>()
+-> Result<ProdCommonStorage<P>, Box<dyn Error + Send + Sync>> {
     use common::test_helpers::get_test_database_url;
     let database_url = get_test_database_url();
     let storage = ProdCommonStorage::new(&database_url).await?;
@@ -47,47 +50,26 @@ pub async fn save_raw_features<P: ProcessibleSerde>(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     ensure_setup().await;
     // Validate features against schema
-    debug!("Raw features JSON: {}", serde_json::to_string_pretty(&features_json)?);
+    debug!(
+        "Raw features JSON: {}",
+        serde_json::to_string_pretty(&features_json)?
+    );
     let validation_result = jsonschema::validate(&storage.get_features_schema(), &features_json);
     if let Err(errors) = validation_result {
         debug!("Validation error details: {:?}", errors);
         return Err(format!("Feature validation failed: {:?}", errors).into());
     }
 
-    // Use the production storage method instead of raw SQL
-    use processing::model::Feature;
-    
-    // Convert the JSON to Feature structs - this would be better done through 
-    // proper deserialization, but for test purposes we'll use the storage layer directly
-    let _empty_simple_features: Option<&[Feature]> = None;
-    let _empty_graph_features: Vec<Feature> = vec![];
-    
-    // For now, we'll still use the raw approach since we're testing raw feature insertion
-    // In a production refactor, this would be replaced with proper Feature objects
-    let pool = create_test_pool().await?;
-    let mut tx = pool.begin().await?;
-
-    sqlx::query(
-        r#"
-        INSERT INTO features (
-            transaction_id, 
-            transaction_version,
-            schema_version_major, 
-            schema_version_minor, 
-            simple_features,
-            graph_features
-        ) VALUES ($1, $2, $3, $4, $5, $6)
-        "#
-    )
-    .bind(transaction_id)
-    .bind(1i32)
-    .bind(1i32)
-    .bind(0i32)
-    .bind(None::<Value>) // simple_features as NULL
-    .bind(features_json) // graph_features
-    .execute(&mut *tx)
+    entities::feature::ActiveModel {
+        id: NotSet,
+        transaction_id: Set(transaction_id),
+        schema_version_major: Set(1),
+        schema_version_minor: Set(0),
+        simple_features: Set(None),
+        graph_features: Set(features_json),
+        created_at: Set(Utc::now().naive_utc()),
+    }
+    .insert(&storage.db)
     .await?;
-
-    tx.commit().await?;
     Ok(())
-} 
+}
