@@ -28,3 +28,6 @@ Thumbs.db
 
 # Database
 postgres_data/
+
+.clj-kondo/
+.lsp/
