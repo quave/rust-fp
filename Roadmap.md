@@ -4,12 +4,11 @@
 - [x] Adjust grafana board
 - [x] Test jsonb based indices
 - [x] Reseach gp indices for jsonb
+- [x] Test mongo indices
+- [x] Switch to mongo
 - [ ] Scorer per chanel in processor
-- [ ] Test mongo indices
-- [ ] Switch to mongo
 - [ ] Fix frontend
 - [ ] Add features, matchers with conditions, rules
-- [ ] Check and fix sql injections
 - [ ] Parallelize saving of features, matchers, scores, extractions, direct-graph connections retrieval
 - [ ] All the entities to graphql
 - [ ] Common features (fraud in connections or so)
