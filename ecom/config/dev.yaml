@@ -1,4 +1,0 @@
-!include ../../config/dev.yaml
-
-importer:
-  project_name: frida_ecom

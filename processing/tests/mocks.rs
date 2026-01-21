@@ -239,7 +239,7 @@ mock! {
     impl processing::scorers::Scorer for ScorerService {
         async fn score_and_save_result(&self, transaction_id: ModelId, activation_id: ModelId, features: Vec<Feature>) -> Result<(), Box<dyn Error + Send + Sync>>;
         fn scorer_type(&self) -> ScoringModelType;
-        fn channel_id(&self) -> ModelId;
+        fn channel_name(&self) -> ModelId;
     }
 }
 
@@ -251,15 +251,13 @@ mock! {
         async fn get_activation_by_channel_id(&self, channel_id: ModelId) -> Result<channel_model_activation::Model, Box<dyn Error + Send + Sync>>;
         async fn get_channel_by_name(&self, name: &str) -> Result<Option<Channel>, Box<dyn Error + Send + Sync>>;
         async fn get_expression_rules(&self, channel_id: ModelId) -> Result<Vec<expression_rule::Model>, Box<dyn Error + Send + Sync>>;
-        async fn insert_transaction(
+        async fn insert_imported_transaction(
             &self,
             payload_number: String,
             payload: serde_json::Value,
             schema_version: (i32, i32),
         ) -> Result<ModelId, Box<dyn Error + Send + Sync>>;
         async fn get_transaction(&self, transaction_id: ModelId) -> Result<Transaction, Box<dyn Error + Send + Sync>>;
-        async fn get_latest_transaction_by_payload(&self, payload_number: &str) -> Result<Option<Transaction>, Box<dyn Error + Send + Sync>>;
-        async fn list_transaction_versions(&self, payload_number: &str) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>>;
         async fn filter_transactions(&self, filters: &[processible::Filter<Box<dyn ColumnValueTrait>>]) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>>;
         async fn mark_transaction_processed(&self, transaction_id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
         async fn save_features<'a>(
@@ -284,7 +282,7 @@ mock! {
 
         async fn find_connected_transactions(
             &self,
-            _transaction_id: i64,
+            _payload_number: &str,
             _max_depth: Option<i32>,
             _limit_count: Option<i32>,
             _filter_config: Option<serde_json::Value>,
@@ -293,7 +291,7 @@ mock! {
 
         async fn get_direct_connections(
             &self,
-            _transaction_id: ModelId
+            _payload_number: &str
         ) -> Result<Vec<DirectConnection>, Box<dyn Error + Send + Sync>>;
 
         async fn save_matching_fields_with_timespace(
@@ -348,10 +346,6 @@ pub fn create_mock_common_storage(
 
     mock.expect_mark_transaction_processed()
         .returning(|_| Ok(()));
-    mock.expect_get_latest_transaction_by_payload()
-        .returning(|_| Ok(None));
-    mock.expect_list_transaction_versions()
-        .returning(|_| Ok(vec![]));
     mock.expect_save_features().returning(|_, _, _| Ok(()));
     {
         let features_clone = features.clone();
@@ -510,7 +504,7 @@ impl CommonStorage for ConnectionTrackingStorage {
     ) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>> {
         Ok(vec![])
     }
-    async fn insert_transaction(
+    async fn insert_imported_transaction(
         &self,
         _payload_number: String,
         _payload: serde_json::Value,
@@ -538,26 +532,7 @@ impl CommonStorage for ConnectionTrackingStorage {
             updated_at: chrono::Utc::now().naive_utc(),
         })
     }
-    async fn get_latest_transaction_by_payload(
-        &self,
-        payload_number: &str,
-    ) -> Result<Option<Transaction>, Box<dyn Error + Send + Sync>> {
-        if payload_number == self.payload_number {
-            self.get_transaction(1).await.map(Some)
-        } else {
-            Ok(None)
-        }
-    }
-    async fn list_transaction_versions(
-        &self,
-        payload_number: &str,
-    ) -> Result<Vec<Transaction>, Box<dyn Error + Send + Sync>> {
-        if payload_number == self.payload_number {
-            Ok(vec![self.get_transaction(1).await?])
-        } else {
-            Ok(Vec::new())
-        }
-    }
+
     async fn mark_transaction_processed(
         &self,
         _transaction_id: ModelId,
@@ -612,7 +587,7 @@ impl CommonStorage for ConnectionTrackingStorage {
 
     async fn find_connected_transactions(
         &self,
-        _transaction_id: i64,
+        _payload_number: &str,
         _max_depth: Option<i32>,
         _limit_count: Option<i32>,
         _filter_config: Option<serde_json::Value>,
@@ -624,7 +599,7 @@ impl CommonStorage for ConnectionTrackingStorage {
 
     async fn get_direct_connections(
         &self,
-        _transaction_id: ModelId,
+        _payload_number: &str,
     ) -> Result<Vec<DirectConnection>, Box<dyn Error + Send + Sync>> {
         self.fetch_direct_called.store(true, Ordering::Relaxed);
         Ok(self.direct_connections.clone())
@@ -689,9 +664,10 @@ mock! {
 
     #[async_trait]
     impl QueueService for QueueService {
-        async fn fetch_next(&self, _number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>>;
+        async fn fetch_next(&self, _number: i32) -> Result<Vec<(ModelId, i64)>, Box<dyn Error + Send + Sync>>;
         async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
-        async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
+        async fn enqueue(&self, ids: &[ModelId]) -> Result<(), Box<dyn Error + Send + Sync>>;
+        async fn is_enqueued(&self, ids: &[i64]) -> Result<Vec<i64>, Box<dyn Error + Send + Sync>>;
     }
 }
 
@@ -703,7 +679,7 @@ mock! {
     impl processing::scorers::Scorer for Scorer {
         async fn score_and_save_result(&self, transaction_id: ModelId, activation_id: ModelId, features: Vec<Feature>) -> Result<(), Box<dyn Error + Send + Sync>>;
         fn scorer_type(&self) -> ScoringModelType;
-        fn channel_id(&self) -> ModelId;
+        fn channel_name(&self) -> ModelId;
     }
 }
 

@@ -231,7 +231,7 @@ async fn test_save_scores_with_empty_list() -> Result<(), Box<dyn Error + Send +
 #[serial_test::serial]
 async fn test_save_scores_with_duplicate_names() -> Result<(), Box<dyn Error + Send + Sync>> {
     let storage = get_test_storage().await?;
-    let db = &storage.db;   
+    let db = &storage.db;
 
     // Clean up any existing test data
     truncate_processing_tables(db).await?;

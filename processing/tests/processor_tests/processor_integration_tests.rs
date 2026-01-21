@@ -32,7 +32,7 @@ async fn test_processor_process() {
     let mut queue = MockQueueService::new();
     queue
         .expect_fetch_next()
-        .returning(move |_| Ok(vec![tx_id]));
+        .returning(move |_| Ok(vec![(tx_id, tx_id)]));
     queue
         .expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
@@ -42,7 +42,7 @@ async fn test_processor_process() {
     let mut failed_queue = MockQueueService::new();
     failed_queue
         .expect_fetch_next()
-        .returning(move |_| Ok(vec![tx_id]));
+        .returning(move |_| Ok(vec![(tx_id, tx_id)]));
     failed_queue
         .expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
@@ -51,8 +51,8 @@ async fn test_processor_process() {
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage),
         Arc::new(queue),
         Arc::new(failed_queue),
@@ -83,20 +83,20 @@ async fn test_processor_process_with_nonexistent_transaction() {
     let mut queue = MockQueueService::new();
     queue
         .expect_fetch_next()
-        .returning(move |_| Ok(vec![tx_id]));
+        .returning(move |_| Ok(vec![(tx_id, tx_id)]));
     queue.expect_mark_processed().returning(|_| Ok(()));
     queue.expect_enqueue().returning(|_| Ok(()));
 
     let mut failed_queue = MockQueueService::new();
     failed_queue
         .expect_fetch_next()
-        .returning(move |_| Ok(vec![tx_id]));
+        .returning(move |_| Ok(vec![(tx_id, tx_id)]));
     failed_queue.expect_mark_processed().returning(|_| Ok(()));
     failed_queue.expect_enqueue().returning(|_| Ok(()));
 
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage),
         Arc::new(queue),
         Arc::new(failed_queue),
@@ -129,7 +129,7 @@ async fn test_processor_with_custom_matching_config() {
     let mut queue = MockQueueService::new();
     queue
         .expect_fetch_next()
-        .returning(move |_| Ok(vec![tx_id]));
+        .returning(move |_| Ok(vec![(tx_id, tx_id)]));
     queue
         .expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
@@ -139,7 +139,7 @@ async fn test_processor_with_custom_matching_config() {
     let mut failed_queue = MockQueueService::new();
     failed_queue
         .expect_fetch_next()
-        .returning(move |_| Ok(vec![tx_id]));
+        .returning(move |_| Ok(vec![(tx_id, tx_id)]));
     failed_queue
         .expect_mark_processed()
         .with(mockall::predicate::eq(tx_id))
@@ -147,8 +147,8 @@ async fn test_processor_with_custom_matching_config() {
     failed_queue.expect_enqueue().returning(|_| Ok(()));
 
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage),
         Arc::new(queue),
         Arc::new(failed_queue),

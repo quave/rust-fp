@@ -5,6 +5,12 @@ use std::{error::Error, fs};
 pub struct CommonConfig {
     pub project_name: String,
     pub database_url: String,
+    pub redis_host: String,
+    pub redis_port: u16,
+    pub redis_username: String,
+    pub redis_password: String,
+    pub redis_db: u8,
+    pub redis_ns: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]

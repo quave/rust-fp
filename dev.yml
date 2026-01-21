@@ -12,6 +12,7 @@ services:
       - "3000:3000"
     depends_on:
       - db
+    profiles: [stage]
 
   backend:
     build:
@@ -26,6 +27,7 @@ services:
       - "8000:8000"
     depends_on:
       - db
+    profiles: [stage]
 
   processor:
     build:
@@ -40,6 +42,7 @@ services:
       - "9100:9100"
     depends_on:
       - db
+    profiles: [stage]
 
   db:
     image: postgis/postgis:16-3.5
@@ -57,6 +60,25 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles: [deps]
+
+  mongo:
+    image: mongo
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: frida
+      MONGO_INITDB_ROOT_PASSWORD: frida
+      MONGO_INITDB_DATABASE: frida
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: [ "CMD-SHELL", "mongo --eval 'db.runCommand({ ping: 1 }).ok' > /dev/null 2>&1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles: [deps]
 
   prometheus:
     image: prom/prometheus:latest
@@ -69,6 +91,7 @@ services:
       - ./prometheus/prometheus-dev.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
       - db
+    profiles: [deps]
 
   grafana:
     image: grafana/grafana:latest
@@ -82,6 +105,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+    profiles: [deps]
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
@@ -95,19 +119,9 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
     depends_on:
       - db
+    profiles: [deps]
   
-  postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
-    container_name: postgres-exporter-dev
-    environment:
-      - DATA_SOURCE_URI=db:5432/postgres?sslmode=disable
-      - DATA_SOURCE_USER=postgres
-      - DATA_SOURCE_PASS=postgres
-    ports:
-      - "9188:9187"
-    depends_on:
-      - db
-
 volumes:
   postgres_data:
   grafana_data_dev:
+  mongo_data:

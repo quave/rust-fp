@@ -1,7 +1,0 @@
-!include base.yaml
-
-common:
-  log_level: debug
-
-processor:
-  log_level: debug

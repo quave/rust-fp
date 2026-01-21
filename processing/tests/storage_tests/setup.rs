@@ -3,6 +3,7 @@ use common::test_helpers::setup_test_environment;
 use processing::{
     model::{ModelId, ProcessibleSerde, sea_orm_storage_model as entities},
     storage::ProdCommonStorage,
+    storage::CommonStorage,
 };
 use sea_orm::ActiveModelTrait;
 use sea_orm::ActiveValue::{NotSet, Set};
@@ -28,7 +29,8 @@ pub async fn ensure_setup() {
 }
 
 // Helper to create a storage instance backed by the test database
-pub async fn get_test_storage() -> Result<ProdCommonStorage<TestPayload>, Box<dyn Error + Send + Sync>> {
+pub async fn get_test_storage()
+-> Result<ProdCommonStorage<TestPayload>, Box<dyn Error + Send + Sync>> {
     ensure_setup().await;
     create_test_common_storage::<TestPayload>().await
 }

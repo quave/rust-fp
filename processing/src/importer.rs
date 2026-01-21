@@ -1,22 +1,23 @@
 use std::{error::Error, marker::PhantomData, sync::Arc};
 
 use crate::{
-    model::{ModelId, Processible, ProcessibleSerde},
+    model::{Processible, ProcessibleSerde},
     queue::QueueService,
     storage::CommonStorage,
 };
 use metrics::{counter, histogram};
+use mongodb::bson::oid::ObjectId;
 use std::time::Instant;
 
 #[derive(Clone)]
-pub struct Importer<P: Processible + ProcessibleSerde> {
-    storage: Arc<dyn CommonStorage>,
-    queue: Arc<dyn QueueService>,
+pub struct Importer<P: Processible + ProcessibleSerde<Id = ObjectId>> {
+    storage: Arc<dyn CommonStorage<P::Id>>,
+    queue: Arc<dyn QueueService<P::Id>>,
     _phantom: PhantomData<P>,
 }
 
-impl<P: Processible + ProcessibleSerde> Importer<P> {
-    pub fn new(storage: Arc<dyn CommonStorage>, queue: Arc<dyn QueueService>) -> Self {
+impl<P: Processible + ProcessibleSerde<Id = ObjectId>> Importer<P> {
+    pub fn new(storage: Arc<dyn CommonStorage<P::Id>>, queue: Arc<dyn QueueService<P::Id>>) -> Self {
         tracing::info!("Initializing new Importer");
         Self {
             storage,
@@ -25,7 +26,7 @@ impl<P: Processible + ProcessibleSerde> Importer<P> {
         }
     }
 
-    pub async fn import(&self, processible: P) -> Result<ModelId, Box<dyn Error + Send + Sync>> {
+    pub async fn import(&self, processible: P) -> Result<P::Id, Box<dyn Error + Send + Sync>> {
         tracing::debug!("Starting import process for new transaction");
 
         let total_start = Instant::now();
@@ -36,7 +37,7 @@ impl<P: Processible + ProcessibleSerde> Importer<P> {
         let insert_start = Instant::now();
         let id = self
             .storage
-            .insert_transaction(payload_number, payload, schema_version)
+            .insert_imported_transaction(payload_number, payload, schema_version)
             .await?;
         {
             let h = histogram!("frida_import_duration_seconds", "stage" => "insert_transaction");
@@ -44,7 +45,7 @@ impl<P: Processible + ProcessibleSerde> Importer<P> {
         }
 
         let enqueue_start = Instant::now();
-        self.queue.enqueue(id).await?;
+        self.queue.enqueue(&[id]).await?;
         {
             let h = histogram!("frida_import_duration_seconds", "stage" => "enqueue");
             h.record(enqueue_start.elapsed().as_secs_f64());

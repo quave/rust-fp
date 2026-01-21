@@ -20,7 +20,7 @@ async fn test_processor_with_high_value_transaction() {
     let storage = create_mock_common_storage(None, Some(transaction), features);
 
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|_| Ok(vec![1]));
+    queue.expect_fetch_next().returning(|_| Ok(vec![(1, 1)]));
     queue.expect_mark_processed().returning(|_| Ok(()));
     queue.expect_enqueue().returning(|_| Ok(()));
     let queue = Arc::new(queue);
@@ -29,8 +29,8 @@ async fn test_processor_with_high_value_transaction() {
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage),
         queue.clone(),
         queue,
@@ -53,7 +53,7 @@ async fn test_processor_with_low_value_transaction() {
     let storage = create_mock_common_storage(None, Some(transaction), features);
 
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|_| Ok(vec![2]));
+    queue.expect_fetch_next().returning(|_| Ok(vec![(2, 2)]));
     queue.expect_mark_processed().returning(|_| Ok(()));
     queue.expect_enqueue().returning(|_| Ok(()));
     let queue = Arc::new(queue);
@@ -62,8 +62,8 @@ async fn test_processor_with_low_value_transaction() {
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage),
         queue.clone(),
         queue,
@@ -95,8 +95,8 @@ async fn test_processor_with_empty_queue() {
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage),
         queue.clone(),
         queue,
@@ -162,7 +162,7 @@ async fn test_processor_scorer_integration() -> Result<(), Box<dyn Error + Send 
     let storage = create_mock_common_storage(None, Some(transaction), features);
 
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|_| Ok(vec![1]));
+    queue.expect_fetch_next().returning(|_| Ok(vec![(1, 1)]));
     queue.expect_mark_processed().returning(|_| Ok(()));
     queue.expect_enqueue().returning(|_| Ok(()));
     let queue = Arc::new(queue);
@@ -171,8 +171,8 @@ async fn test_processor_scorer_integration() -> Result<(), Box<dyn Error + Send 
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage),
         queue.clone(),
         queue,

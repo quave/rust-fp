@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "common",
-    "ecom",
+    "ecom-f2",
     "processing",
 ]
 resolver = "2"
@@ -33,7 +33,7 @@ regex = "1.12.2"
 once_cell = "1.21.3"
 dotenvy = "0.15.7"
 axum = "0.8.7"
-async-graphql = {version = "7.0.17", features=["chrono", "dynamic-schema", "graphiql", "playground", "log", "tracing", "tokio-sync"]}
+async-graphql = {version = "7.0.17", features=["chrono", "dynamic-schema", "graphiql", "playground", "log", "tokio-sync"]}
 async-graphql-axum = "7.0.17"
 tower-http = { version = "0.6.2", features = ["cors"] }
 tower = "0.5.2"
@@ -43,3 +43,5 @@ mockall = "0.13.1"
 lazy_static = "1.5.0"
 metrics = "0.24.2"
 metrics-exporter-prometheus = "0.17.2"
+pgmq = "0.31.1"
+mongodb = "3.4.1"

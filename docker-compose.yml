@@ -55,6 +55,23 @@ services:
       timeout: 5s
       retries: 5
 
+  mongo:
+    image: mongo
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: frida
+      MONGO_INITDB_ROOT_PASSWORD: frida
+      MONGO_INITDB_DATABASE: frida
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: [ "CMD-SHELL", "mongo --eval 'db.runCommand({ ping: 1 }).ok' > /dev/null 2>&1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -109,3 +126,4 @@ services:
 volumes:
   postgres_data:
   grafana_data:
+  mongo_data:

@@ -11,7 +11,7 @@ use metrics::histogram;
 use std::time::Instant;
 
 use crate::{
-    model::{Processible, ProcessibleSerde, Transaction},
+    model::{Processible, ProcessibleSerde, mongo_model::Transaction},
     storage::CommonStorage,
 };
 
@@ -47,7 +47,7 @@ fn transaction_object<P: ProcessibleSerde>(payload_type_name: &str) -> Object {
             Field::new("id", TypeRef::named_nn(TypeRef::INT), |ctx| {
                 FieldFuture::new(async move {
                     let tx = to_transaction(ctx.parent_value);
-                    Ok(Some(Value::from(tx.id)))
+                    Ok(Some(Value::from(tx._id.to_hex())))
                 })
             })
             .description("The internal id of the transaction."),
@@ -103,10 +103,10 @@ fn transaction_object<P: ProcessibleSerde>(payload_type_name: &str) -> Object {
             .description("The minor version of the schema."),
         )
         .field(
-            Field::new("label_id", TypeRef::named(TypeRef::INT), |ctx| {
+            Field::new("fraud_level", TypeRef::named(TypeRef::STRING), |ctx| {
                 FieldFuture::new(async move {
                     let tx = to_transaction(ctx.parent_value);
-                    Ok(tx.label_id.map(Value::from))
+                    Ok(tx.label.as_ref().map(|l| Value::from(l.fraud_level.to_string())))
                 })
             })
             .description("The id of the label."),
@@ -158,7 +158,7 @@ fn transaction_object<P: ProcessibleSerde>(payload_type_name: &str) -> Object {
 }
 
 pub fn schema<P: Processible + ProcessibleSerde + 'static>(
-    common_storage: Arc<dyn CommonStorage>,
+    common_storage: Arc<dyn CommonStorage<P::Id>>,
 ) -> Result<Schema, SchemaError> {
     let (payload, column_types) = payload::build_payload_and_types::<P>();
 
@@ -176,7 +176,7 @@ pub fn schema<P: Processible + ProcessibleSerde + 'static>(
         .field(
             Field::new("transaction", TypeRef::named_list(transaction.type_name()), move |ctx| {
                 FieldFuture::new(async move {
-                    let storage = ctx.data::<Arc<dyn CommonStorage>>()?;
+                    let storage = ctx.data::<Arc<dyn CommonStorage<P::Id>>>()?;
                     let column_types = ctx.data::<Arc<ColumnTypeIndex>>()?;
                     let filters_object = ctx.args.try_get("filters")?.object()?;
                     let filters = filters::parse_filters::<P>(column_types, filters_object)?;

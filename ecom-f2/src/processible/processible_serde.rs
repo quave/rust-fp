@@ -3,10 +3,10 @@ use std::error::Error;
 use async_trait::async_trait;
 use processing::model::{ProcessibleSerde, processible::ColumnFilter};
 
-use crate::model::EcomOrder;
+use crate::model::EcomF2Order;
 
 #[async_trait]
-impl ProcessibleSerde for EcomOrder {
+impl ProcessibleSerde for EcomF2Order {
     fn as_json(&self) -> Result<serde_json::Value, Box<dyn Error + Send + Sync>> {
         Ok(serde_json::to_value(self)?)
     }

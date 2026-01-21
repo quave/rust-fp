@@ -1,151 +1,110 @@
 use async_trait::async_trait;
-use chrono::Utc;
-use sea_orm::ActiveValue::{NotSet, Set};
-use sea_orm::sea_query::Expr;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, Database, DatabaseConnection, DbBackend,
-    EntityTrait, QueryFilter, Statement, Value,
-};
-use std::error::Error;
-use tracing::info;
-
-use crate::model::ModelId;
-use crate::model::sea_orm_queue_entities::{processing_queue, recalculation_queue};
+use common::config::CommonConfig;
+use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
+use serde::{Serialize, de::DeserializeOwned};
+use std::{error::Error, str::FromStr};
+use pgmq::{Message, PGMQueue};
+use strum_macros::Display;
 
 // Queue service interface
 #[async_trait]
-pub trait QueueService: Send + Sync {
-    async fn fetch_next(&self, number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>>;
-    async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
-    async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>>;
+pub trait QueueService<ID: Send + Sync + Serialize + DeserializeOwned>: Send + Sync + 'static {
+    async fn fetch_next(&self, number: i32) -> Result<Vec<(ID, i64)>, Box<dyn Error + Send + Sync>>;
+    async fn mark_processed(&self, id: i64) -> Result<(), Box<dyn Error + Send + Sync>>;
+    async fn enqueue(&self, ids: &[ID]) -> Result<(), Box<dyn Error + Send + Sync>>;
+    async fn is_enqueued(&self, ids: &[ID]) -> Result<Vec<ID>, Box<dyn Error + Send + Sync>>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+pub enum QueueName {
+    #[strum(to_string = "processing_queue")]
+    Processing,
+    #[strum(to_string = "recalculation_queue")]
+    Recalculation,
 }
 
 pub struct ProdQueue {
+    queue: PGMQueue,
+    queue_name: QueueName,
     db: DatabaseConnection,
 }
 
 impl ProdQueue {
-    pub async fn new(database_url: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let db = Database::connect(database_url).await?;
-        Ok(Self { db })
+    pub async fn new(config: &CommonConfig, queue_name: QueueName) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        println!("Trying to connect to db for queue: {:?}", queue_name);
+        let db = Database::connect(config.database_url.clone())
+            .await
+            .expect("Failed to connect to database");
+
+        let index_sql = format!("create index if not exists idx_q_{}_message on pgmq.q_{}(message)",
+            queue_name.to_string().to_lowercase(), queue_name.to_string().to_lowercase());
+        db.execute(Statement::from_string(DbBackend::Postgres, index_sql)).await?;
+
+        let queue: PGMQueue = PGMQueue::new(config.database_url.clone())
+            .await
+            .expect("Failed to connect to postgres");
+        println!("Connected to db for prod_queue");
+
+        println!("Creating a queue '{:?}'", queue_name);
+        queue.create(&queue_name.to_string())
+            .await
+            .expect("Failed to create queue");
+        Ok(Self { queue, queue_name, db})
     }
 }
 
 #[async_trait]
-impl QueueService for ProdQueue {
-    async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!("Queue[processing_queue]: Enqueuing transaction: {:?}", id);
-        processing_queue::ActiveModel {
-            id: NotSet,
-            transaction_id: Set(id),
-            processed_at: Set(None),
-            created_at: Set(Utc::now().naive_utc()),
+impl<ID: Send + Sync + Serialize + DeserializeOwned + ToString + FromStr> QueueService<ID> for ProdQueue {
+    async fn enqueue(&self, ids: &[ID]) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if ids.is_empty() {
+            return Ok(());
         }
-        .insert(&self.db)
-        .await?;
+
+        self.queue.send_batch::<ID>(&self.queue_name.to_string(), &ids)
+            .await
+            .expect("Failed to send message to queue");
         Ok(())
     }
 
-    async fn fetch_next(&self, number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>> {
-        let rows = self
+    async fn fetch_next(&self, _number: i32) -> Result<Vec<(ID, i64)>, Box<dyn Error + Send + Sync>> {
+        let visibility_timeout_seconds: i32 = 30;
+
+        let received_message: Option<Message<ID>> = self
+            .queue
+            .read::<ID>(&self.queue_name.to_string(), Some(visibility_timeout_seconds))
+            .await?;
+
+        Ok(received_message.map(|msg| vec![(msg.message, msg.msg_id)]).unwrap_or_default())
+    }
+
+    async fn mark_processed(&self, msg_id: i64) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let _ = self.queue.archive(&self.queue_name.to_string(), msg_id)
+            .await
+            .expect("Failed to archive message");
+        Ok(())
+    }
+
+    async fn is_enqueued(&self, ids: &[ID]) -> Result<Vec<ID>, Box<dyn Error + Send + Sync>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let ids_str = ids.iter().map(|id| format!("'{}'::jsonb", id.to_string())).collect::<Vec<String>>().join(",");
+        let sql = format!("select message from pgmq.q_recalculation_queue where message in ({});", ids_str);
+        let result: Vec<ID> = self
             .db
-            .query_all(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                r#"
-                SELECT transaction_id
-                FROM processing_queue
-                WHERE processed_at IS NULL
-                ORDER BY created_at ASC
-                FOR UPDATE SKIP LOCKED
-                LIMIT $1
-                "#,
-                vec![Value::from(number as i64)],
-            ))
-            .await?;
+            .query_all(Statement::from_string(DbBackend::Postgres, sql))
+            .await?
+            .iter()
+            .map(|row| 
+                row
+                    .try_get::<String>("", "message")
+                    .expect("Failed to get message")
+                    .parse::<ID>()
+                    .map_err(|_| "Failed to parse ID")
+                    .expect("Failed to parse ID"))
+            .collect::<Vec<ID>>();
 
-        let mut ids = Vec::with_capacity(rows.len());
-        for row in rows {
-            ids.push(row.try_get::<ModelId>("", "transaction_id")?);
-        }
-        Ok(ids)
-    }
-
-    async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        processing_queue::Entity::update_many()
-            .col_expr(
-                processing_queue::Column::ProcessedAt,
-                Expr::value(Utc::now().naive_utc()),
-            )
-            .filter(processing_queue::Column::TransactionId.eq(id))
-            .exec(&self.db)
-            .await?;
-        Ok(())
-    }
-}
-
-pub struct RecalcQueue {
-    db: DatabaseConnection,
-}
-
-impl RecalcQueue {
-    pub async fn new(database_url: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let db = Database::connect(database_url).await?;
-        Ok(Self { db })
-    }
-}
-
-#[async_trait]
-impl QueueService for RecalcQueue {
-    async fn enqueue(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!(
-            "Queue[recalculation_queue]: Enqueuing transaction: {:?}",
-            id
-        );
-        recalculation_queue::ActiveModel {
-            id: NotSet,
-            transaction_id: Set(id),
-            processed_at: Set(None),
-            created_at: Set(Utc::now().naive_utc()),
-        }
-        .insert(&self.db)
-        .await?;
-
-        Ok(())
-    }
-
-    async fn fetch_next(&self, number: i32) -> Result<Vec<ModelId>, Box<dyn Error + Send + Sync>> {
-        let rows = self
-            .db
-            .query_all(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                r#"
-                SELECT transaction_id
-                FROM recalculation_queue
-                WHERE processed_at IS NULL
-                ORDER BY created_at ASC
-                FOR UPDATE SKIP LOCKED
-                LIMIT $1
-                "#,
-                vec![Value::from(number as i64)],
-            ))
-            .await?;
-
-        let mut ids = Vec::with_capacity(rows.len());
-        for row in rows {
-            ids.push(row.try_get::<ModelId>("", "transaction_id")?);
-        }
-        Ok(ids)
-    }
-
-    async fn mark_processed(&self, id: ModelId) -> Result<(), Box<dyn Error + Send + Sync>> {
-        recalculation_queue::Entity::update_many()
-            .col_expr(
-                recalculation_queue::Column::ProcessedAt,
-                Expr::value(Utc::now().naive_utc()),
-            )
-            .filter(recalculation_queue::Column::TransactionId.eq(id))
-            .exec(&self.db)
-            .await?;
-        Ok(())
+        Ok(result)
     }
 }

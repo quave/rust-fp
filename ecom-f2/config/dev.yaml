@@ -1,0 +1,8 @@
+# !include ../../config/dev.yaml
+
+common:
+  project_name: frida_ecom
+importer:
+  log_level: info
+processor:
+  threads: 8

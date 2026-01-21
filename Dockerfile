@@ -1,4 +1,10 @@
-FROM node:alpine as web-builder
+ARG PROFILE=release
+ARG MODULE=ecom-f2
+ARG FRIDA_ENV=production
+ARG YQ_PLATFORM=linux_arm64
+
+# # build the web app
+FROM node:alpine AS web-builder
 
 WORKDIR /app
 COPY web/package*.json ./
@@ -7,52 +13,40 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM rust:slim-bookworm as rust-builder
+# build the rust binaries
+FROM rust:slim-bookworm AS rust-builder
 
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
+ARG PROFILE
+ARG MODULE
+ARG FRIDA_ENV
+ARG YQ_PLATFORM
+
+RUN apt-get update && \
+    apt-get install -y pkg-config libssl-dev wget &&\
+    rm -rf /var/lib/apt/lists/* && \
+    wget https://github.com/mikefarah/yq/releases/download/v4.2.0/yq_${YQ_PLATFORM} -O /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
 
 WORKDIR /app
-
-# COPY Cargo.toml Cargo.lock ./
-# COPY common/Cargo.toml common/
-# COPY processing/Cargo.toml processing/
-# COPY ecom/Cargo.toml ecom/
-# COPY ecom/build.rs ecom/
-
-# RUN mkdir -p \
-#     common/src \
-#     processing/src \
-#     ecom/src \
-#     && touch \
-#     common/src/lib.rs \
-#     processing/src/lib.rs \
-#     ecom/src/lib.rs
-
-# RUN cargo build --release
 
 COPY . .
-COPY --from=web-builder /app/dist web/dist
+RUN yq eval-all 'select(fileIndex==0) * select(fileIndex==1) * select(fileIndex==2)' \
+    /app/config/base.yaml /app/config/${FRIDA_ENV}.yaml /app/${MODULE}/config/${FRIDA_ENV}.yaml \
+    > /app/config/total_config.yaml && \
+    cargo build --${PROFILE}
 
-RUN cargo build --release
-
+# # build the final image
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates libssl3 &&\
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=rust-builder /app/target/release/config/total_config.yaml /app/config/total_config.yaml
+COPY --from=rust-builder /app/config/total_config.yaml /app/config/total_config.yaml
 COPY --from=rust-builder /app/target/release/importer /app/
 COPY --from=rust-builder /app/target/release/processor /app/
 COPY --from=rust-builder /app/target/release/backend /app/
 COPY --from=web-builder /app/dist /app/web/dist
-
-ENV RUST_LOG=info
 
 CMD ["./importer --config /app/config/total_config.yaml"]

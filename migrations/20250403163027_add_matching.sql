@@ -11,10 +11,11 @@ CREATE TABLE IF NOT EXISTS match_node (
     confidence INTEGER NOT NULL,
     importance INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX idx_match_node_matcher_value ON match_node(matcher, value);
 
 CREATE TABLE IF NOT EXISTS match_node_transactions (
     node_id BIGINT NOT NULL,
-    transaction_id BIGINT NOT NULL,
+    payload_number TEXT NOT NULL,
     datetime_alpha TIMESTAMP NULL,
     datetime_beta TIMESTAMP NULL,
     long_alpha DOUBLE PRECISION NULL,
@@ -26,356 +27,183 @@ CREATE TABLE IF NOT EXISTS match_node_transactions (
     long_delta DOUBLE PRECISION NULL,
     lat_delta DOUBLE PRECISION NULL,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
-    PRIMARY KEY (node_id, transaction_id),
-    CONSTRAINT fk_match_node_transactions_node FOREIGN KEY (node_id) REFERENCES match_node(id),
-    CONSTRAINT fk_match_node_transactions_transaction FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+    PRIMARY KEY (node_id, payload_number),
+    CONSTRAINT fk_match_node_transactions_node FOREIGN KEY (node_id) REFERENCES match_node(id) ON DELETE CASCADE
 );
-
 -- Add indexes for faster lookups
-CREATE UNIQUE INDEX idx_match_node_matcher_value ON match_node(matcher, value);
-CREATE INDEX idx_match_node_transactions_transaction_id ON match_node_transactions(transaction_id);
+CREATE INDEX idx_match_node_transactions_payload_number ON match_node_transactions(payload_number);
 CREATE INDEX idx_match_node_transactions_node_id ON match_node_transactions(node_id);
-
+CREATE INDEX idx_match_node_transactions_payload_number_node_id on match_node_transactions(payload_number, node_id);
+CREATE INDEX idx_match_node_transactions_node_id_payload_number on match_node_transactions(node_id, payload_number);
 
 DROP FUNCTION if exists find_connected_transactions;
-DROP FUNCTION if exists find_connected_transactions_impl;
 DROP FUNCTION if exists test_find_connected_transactions;
 DROP FUNCTION if exists init_transaction_matching;
 DROP FUNCTION if exists find_transaction_connections;
 DROP FUNCTION if exists apply_transaction_filters;
 DROP FUNCTION if exists init_with_starting_transaction;
 
--- Helper function to initialize transaction matching tables
-CREATE OR REPLACE FUNCTION init_transaction_matching() 
-RETURNS TABLE (
-    process_queue_table TEXT,
-    next_batch_table TEXT,
-    result_set_table TEXT,
-    all_processed_table TEXT
-) AS $$
-BEGIN
-    -- Create temporary tables with indexes
-    CREATE TEMP TABLE IF NOT EXISTS process_queue (
-        id BIGINT PRIMARY KEY,
-        created_at TIMESTAMP,
-        path_matchers TEXT[],
-        path_values TEXT[],
-        confidence INTEGER,
-        importance INTEGER,
-        depth INTEGER
-    ) ON COMMIT DROP;
-    
-    CREATE TEMP TABLE IF NOT EXISTS next_batch (
-        id BIGINT PRIMARY KEY,
-        created_at TIMESTAMP,
-        path_matchers TEXT[],
-        path_values TEXT[],
-        confidence INTEGER,
-        importance INTEGER,
-        depth INTEGER
-    ) ON COMMIT DROP;
-    
-    CREATE TEMP TABLE IF NOT EXISTS result_set (
-        id BIGINT PRIMARY KEY,
-        created_at TIMESTAMP,
-        path_matchers TEXT[],
-        path_values TEXT[],
-        confidence INTEGER,
-        importance INTEGER,
-        depth INTEGER
-    ) ON COMMIT DROP;
-    
-    -- Table to track all processed IDs to avoid cycles
-    CREATE TEMP TABLE IF NOT EXISTS all_processed (
-        id BIGINT PRIMARY KEY
-    ) ON COMMIT DROP;
-    
-    -- Clear temporary tables
-    TRUNCATE process_queue;
-    TRUNCATE next_batch;
-    TRUNCATE result_set;
-    TRUNCATE all_processed;
-    
-    -- Return table names
-    RETURN QUERY SELECT 
-        'process_queue'::TEXT, 
-        'next_batch'::TEXT, 
-        'result_set'::TEXT, 
-        'all_processed'::TEXT;
-END;
-$$ LANGUAGE plpgsql;
+create or replace function find_next_layer_direct_connections(
+    root_payload_numbers text[],
+    min_confidence INTEGER DEFAULT 0
+)
+returns table (parent_payload_number text, next_payload_number text, node_id bigint)
+as $$
+begin
+    if array_length(root_payload_numbers, 1) = 0 then
+        return;
+    end if;
 
--- Helper function to find connections from current transaction batch
-CREATE OR REPLACE FUNCTION find_transaction_connections(
-    min_confidence INTEGER,
-    root_transaction_id BIGINT,
-    root_payload_number TEXT,
-    filter_config JSONB DEFAULT NULL
-) RETURNS VOID AS $$
-BEGIN
-    -- Find all connections from process_queue
-    INSERT INTO next_batch (id, created_at, path_matchers, path_values, confidence, importance, depth)
-    SELECT
-        t.id,
-        t.created_at,
-        pq.path_matchers || ARRAY[mn.matcher],
-        pq.path_values || ARRAY[mn.value],
-        mn.confidence,
-        mn.importance,
-        pq.depth + 1
-    FROM process_queue pq
-    JOIN match_node_transactions mnt1 ON mnt1.transaction_id = pq.id
-    LEFT JOIN match_node_transactions root_mnt 
-        ON root_mnt.node_id = mnt1.node_id AND root_mnt.transaction_id = root_transaction_id
-    JOIN match_node_transactions mnt ON mnt.node_id = mnt1.node_id
-    JOIN match_node mn ON mn.id = mnt1.node_id
-    JOIN transactions t ON t.id = mnt.transaction_id
-    WHERE 
-        t.id != pq.id
-        AND t.payload_number != root_payload_number
-        AND NOT EXISTS (SELECT 1 FROM all_processed ap WHERE ap.id = t.id)
-        AND mn.confidence >= min_confidence
+    return query select distinct on (mnt_next.payload_number)
+        mnt.payload_number as parent_payload_number,
+        mnt_next.payload_number as next_payload_number,
+        node.id as node_id
+    from match_node_transactions mnt
+    join match_node node on node.id = mnt.node_id
+    join match_node_transactions mnt_next on mnt_next.node_id = node.id
+    LEFT JOIN tmp_filter_config cfg ON cfg.matcher = node.matcher
+    where mnt.payload_number = ANY(root_payload_numbers)
+        and mnt_next.payload_number != ANY (root_payload_numbers)
+        and node.confidence >= min_confidence
         AND (
-            filter_config IS NULL OR NOT (filter_config ? mn.matcher) OR (
-                -- timestamp_alpha in days threshold
-                (NOT (filter_config->mn.matcher ? 'timestamp_alpha') OR
-                    root_mnt.datetime_alpha IS NULL OR mnt.datetime_alpha IS NULL OR
-                    abs(extract(epoch from (mnt.datetime_alpha - root_mnt.datetime_alpha)))/86400.0 <=
-                        (filter_config->mn.matcher->>'timestamp_alpha')::numeric
+            cfg.matcher IS NULL OR (
+                (cfg.timestamp_alpha IS NULL OR
+                    mnt.datetime_alpha IS NULL OR
+                    mnt_next.datetime_alpha IS NULL OR
+                    ABS(EXTRACT(EPOCH FROM (mnt_next.datetime_alpha - mnt.datetime_alpha)))/86400.0 <= cfg.timestamp_alpha
                 )
                 AND
-                (NOT (filter_config->mn.matcher ? 'timestamp_beta') OR
-                    root_mnt.datetime_beta IS NULL OR mnt.datetime_beta IS NULL OR
-                    abs(extract(epoch from (mnt.datetime_beta - root_mnt.datetime_beta)))/86400.0 <=
-                        (filter_config->mn.matcher->>'timestamp_beta')::numeric
+                (cfg.timestamp_beta IS NULL OR
+                    mnt_next.datetime_beta IS NULL OR
+                    mnt.datetime_beta IS NULL OR
+                    ABS(EXTRACT(EPOCH FROM (mnt_next.datetime_beta - mnt.datetime_beta)))/86400.0 <= cfg.timestamp_beta
                 )
                 AND
-                (NOT (filter_config->mn.matcher ? 'location_alpha') OR
-                    root_mnt.long_alpha IS NULL OR root_mnt.lat_alpha IS NULL OR
+                (cfg.location_alpha IS NULL OR
+                    mnt_next.long_alpha IS NULL OR mnt_next.lat_alpha IS NULL OR
                     mnt.long_alpha IS NULL OR mnt.lat_alpha IS NULL OR
                     ST_Distance(
-                        ST_SetSRID(ST_MakePoint(root_mnt.long_alpha, root_mnt.lat_alpha), 4326)::geography,
-                        ST_SetSRID(ST_MakePoint(mnt.long_alpha, mnt.lat_alpha), 4326)::geography
-                    ) <= (filter_config->mn.matcher->>'location_alpha')::numeric
+                        ST_SetSRID(ST_MakePoint(mnt.long_alpha, mnt.lat_alpha), 4326)::geography,
+                        ST_SetSRID(ST_MakePoint(mnt_next.long_alpha, mnt_next.lat_alpha), 4326)::geography
+                    ) <= cfg.location_alpha
                 )
                 AND
-                (NOT (filter_config->mn.matcher ? 'location_beta') OR
-                    root_mnt.long_beta IS NULL OR root_mnt.lat_beta IS NULL OR
+                (cfg.location_beta IS NULL OR
+                    mnt_next.long_beta IS NULL OR mnt_next.lat_beta IS NULL OR
                     mnt.long_beta IS NULL OR mnt.lat_beta IS NULL OR
                     ST_Distance(
-                        ST_SetSRID(ST_MakePoint(root_mnt.long_beta, root_mnt.lat_beta), 4326)::geography,
-                        ST_SetSRID(ST_MakePoint(mnt.long_beta, mnt.lat_beta), 4326)::geography
-                    ) <= (filter_config->mn.matcher->>'location_beta')::numeric
+                        ST_SetSRID(ST_MakePoint(mnt.long_beta, mnt.lat_beta), 4326)::geography,
+                        ST_SetSRID(ST_MakePoint(mnt_next.long_beta, mnt_next.lat_beta), 4326)::geography
+                    ) <= cfg.location_beta
                 )
                 AND
-                (NOT (filter_config->mn.matcher ? 'location_gamma') OR
-                    root_mnt.long_gamma IS NULL OR root_mnt.lat_gamma IS NULL OR
+                (cfg.location_gamma IS NULL OR
+                    mnt_next.long_gamma IS NULL OR mnt_next.lat_gamma IS NULL OR
                     mnt.long_gamma IS NULL OR mnt.lat_gamma IS NULL OR
                     ST_Distance(
-                        ST_SetSRID(ST_MakePoint(root_mnt.long_gamma, root_mnt.lat_gamma), 4326)::geography,
-                        ST_SetSRID(ST_MakePoint(mnt.long_gamma, mnt.lat_gamma), 4326)::geography
-                    ) <= (filter_config->mn.matcher->>'location_gamma')::numeric
+                        ST_SetSRID(ST_MakePoint(mnt.long_gamma, mnt.lat_gamma), 4326)::geography,
+                        ST_SetSRID(ST_MakePoint(mnt_next.long_gamma, mnt_next.lat_gamma), 4326)::geography
+                    ) <= cfg.location_gamma
                 )
                 AND
-                (NOT (filter_config->mn.matcher ? 'location_delta') OR
-                    root_mnt.long_delta IS NULL OR root_mnt.lat_delta IS NULL OR
+                (cfg.location_delta IS NULL OR
+                    mnt_next.long_delta IS NULL OR mnt_next.lat_delta IS NULL OR
                     mnt.long_delta IS NULL OR mnt.lat_delta IS NULL OR
                     ST_Distance(
-                        ST_SetSRID(ST_MakePoint(root_mnt.long_delta, root_mnt.lat_delta), 4326)::geography,
-                        ST_SetSRID(ST_MakePoint(mnt.long_delta, mnt.lat_delta), 4326)::geography
-                    ) <= (filter_config->mn.matcher->>'location_delta')::numeric
+                        ST_SetSRID(ST_MakePoint(mnt.long_delta, mnt.lat_delta), 4326)::geography,
+                        ST_SetSRID(ST_MakePoint(mnt_next.long_delta, mnt_next.lat_delta), 4326)::geography
+                    ) <= cfg.location_delta
                 )
             )
         )
-    ON CONFLICT (id) DO NOTHING;
-    
-    -- Mark all as processed to avoid cycles
-    INSERT INTO all_processed
-    SELECT nb.id FROM next_batch nb
-    ON CONFLICT (id) DO NOTHING;
-END;
-$$ LANGUAGE plpgsql;
+    order by mnt_next.payload_number, node.confidence desc, node.importance desc;
+end;
+$$ language plpgsql;
 
--- Helper function to apply filters to transaction results
-CREATE OR REPLACE FUNCTION apply_transaction_filters(
-    limit_count INTEGER
-) RETURNS VOID AS $$
-DECLARE
-    remaining_count INTEGER;
-BEGIN
-    -- Add transactions that meet filter criteria to results (with deterministic ordering and proper limiting)
-    IF limit_count IS NULL THEN
-        INSERT INTO result_set (id, created_at, path_matchers, path_values, confidence, importance, depth)
-        SELECT 
-            nb.id, nb.created_at, nb.path_matchers, nb.path_values, nb.confidence, nb.importance, nb.depth
-        FROM next_batch nb
-        ORDER BY 
-            nb.confidence DESC,
-            nb.importance DESC,
-            nb.depth,
-            nb.id;
-    ELSE
-        remaining_count := GREATEST(limit_count - (SELECT COUNT(*) FROM result_set), 0);
-        IF remaining_count > 0 THEN
-            INSERT INTO result_set (id, created_at, path_matchers, path_values, confidence, importance, depth)
-            SELECT 
-                nb.id, nb.created_at, nb.path_matchers, nb.path_values, nb.confidence, nb.importance, nb.depth
-            FROM next_batch nb
-            ORDER BY 
-                nb.confidence DESC,
-                nb.importance DESC,
-                nb.depth,
-                nb.id
-            LIMIT remaining_count;
-        END IF;
-    END IF;
-        
-    -- Move qualifying transactions to next level for traversal
-    TRUNCATE process_queue;
-    INSERT INTO process_queue (id, created_at, path_matchers, path_values, confidence, importance, depth)
-    SELECT nb.id, nb.created_at, nb.path_matchers, nb.path_values, nb.confidence, nb.importance, nb.depth
-    FROM next_batch nb;
-END;
-$$ LANGUAGE plpgsql;
-
--- Helper function to initialize with the starting transaction
-CREATE OR REPLACE FUNCTION init_with_starting_transaction(
-    input_transaction_id BIGINT
-) RETURNS VOID AS $$
-BEGIN
-    -- Initialize with start transaction
-    INSERT INTO process_queue (id, created_at, path_matchers, path_values, confidence, importance, depth)
-    SELECT 
-        t.id, 
-        t.created_at,
-        ARRAY[mn.matcher],
-        ARRAY[mn.value],
-        mn.confidence,
-        mn.importance,
-        0
-    FROM transactions t
-    JOIN match_node_transactions mnt ON t.id = mnt.transaction_id
-    JOIN match_node mn ON mnt.node_id = mn.id
-    WHERE t.id = input_transaction_id
-    LIMIT 1;
-    
-    -- Add the starting transaction to results
-    INSERT INTO result_set (id, created_at, path_matchers, path_values, confidence, importance, depth)
-    SELECT * FROM process_queue;
-    
-    -- Mark as processed
-    INSERT INTO all_processed VALUES (input_transaction_id);
-END;
-$$ LANGUAGE plpgsql;
-
--- Main function to find connected transactions
--- Traverses transaction connections based on match_node links
--- Uses breadth-first search to find connections efficiently
--- Supports filtering by confidence threshold, max depth, result limit, and filter_config JSON thresholds
 CREATE OR REPLACE FUNCTION find_connected_transactions(
-    input_transaction_id BIGINT,
-    max_depth INTEGER DEFAULT NULL,
-    limit_count INTEGER DEFAULT NULL,
+    root_payload_number TEXT,
+    max_depth INTEGER DEFAULT 10,
+    limit_count INTEGER DEFAULT 1000,
     filter_config JSONB DEFAULT NULL,
-    min_confidence INTEGER DEFAULT 0,
-    min_connections INTEGER DEFAULT 1 -- Kept for backward compatibility but not used internally
+    min_confidence INTEGER DEFAULT 0
 ) RETURNS TABLE (
     transaction_id BIGINT,
-    path_matchers TEXT[],
-    path_values TEXT[],
-    depth INTEGER,
+    parent_transaction_id BIGINT,
+    matcher TEXT,
     confidence INTEGER,
     importance INTEGER,
     created_at TIMESTAMP
 ) AS $$
-DECLARE
-    max_traverse_depth INTEGER;
-    root_payload_number TEXT;
 BEGIN
-    -- Initialize max traverse depth - ensure we don't process beyond our limit
-    max_traverse_depth := CASE WHEN max_depth IS NULL THEN NULL ELSE max_depth - 1 END;
-    
-    -- Determine the root transaction payload to avoid connecting to other versions of the same payload
-    SELECT payload_number INTO root_payload_number FROM transactions WHERE id = input_transaction_id;
-    IF root_payload_number IS NULL THEN
-        RAISE EXCEPTION 'Transaction % not found for matching', input_transaction_id;
+    DROP TABLE IF EXISTS tmp_filter_config;
+    CREATE TEMP TABLE tmp_filter_config (
+        matcher TEXT PRIMARY KEY,
+        timestamp_alpha NUMERIC,
+        timestamp_beta NUMERIC,
+        location_alpha DOUBLE PRECISION,
+        location_beta DOUBLE PRECISION,
+        location_gamma DOUBLE PRECISION,
+        location_delta DOUBLE PRECISION
+    ) ON COMMIT DROP;
+
+    IF filter_config IS NOT NULL THEN
+        INSERT INTO tmp_filter_config (
+            matcher,
+            timestamp_alpha,
+            timestamp_beta,
+            location_alpha,
+            location_beta,
+            location_gamma,
+            location_delta
+        )
+        SELECT 
+            cfg.key,
+            NULLIF(cfg.value->>'timestamp_alpha', '')::numeric,
+            NULLIF(cfg.value->>'timestamp_beta', '')::numeric,
+            NULLIF(cfg.value->>'location_alpha', '')::double precision,
+            NULLIF(cfg.value->>'location_beta', '')::double precision,
+            NULLIF(cfg.value->>'location_gamma', '')::double precision,
+            NULLIF(cfg.value->>'location_delta', '')::double precision
+        FROM jsonb_each(filter_config) AS cfg(key, value);
     END IF;
-    
-    -- Initialize all the temporary tables
-    PERFORM init_transaction_matching();
-    
-    -- Initialize with the starting transaction
-    PERFORM init_with_starting_transaction(input_transaction_id);
-    
-    -- Process transactions level by level (breadth-first)
-    WHILE EXISTS (SELECT 1 FROM process_queue) 
-    AND (max_traverse_depth IS NULL OR (SELECT MAX(pq.depth) FROM process_queue pq) < max_traverse_depth) 
-    AND (limit_count IS NULL OR (SELECT COUNT(*) FROM result_set) < limit_count) LOOP
-        -- Clear next batch
-        TRUNCATE next_batch;
-        
-        -- Find connections from current batch
-        PERFORM find_transaction_connections(min_confidence, input_transaction_id, root_payload_number, filter_config);
-        
-        -- Apply filters to results
-        PERFORM apply_transaction_filters(limit_count);
-        
-        -- Exit if no more transactions to process or limit reached
-        IF NOT EXISTS (SELECT 1 FROM process_queue) OR 
-           (limit_count IS NOT NULL AND (SELECT COUNT(*) FROM result_set) >= limit_count) THEN
-            EXIT;
-        END IF;
+
+    drop table if exists tmp_connections;
+    create temp table tmp_connections (payload_number text not null primary key, parent_payload_number text, node_id bigint, depth int not null);
+    insert into tmp_connections (payload_number, parent_payload_number, node_id, depth) values (root_payload_number, null, null, 0);
+
+    FOR i IN 1..coalesce(max_depth, 10) LOOP
+        insert into tmp_connections (payload_number, parent_payload_number, node_id, depth)
+        select next_payload_number, parent_payload_number, node_id, i 
+        from find_next_layer_direct_connections(
+            (select array_agg(payload_number) from tmp_connections where depth = i - 1)::text[],
+            min_confidence
+        )
+        where next_payload_number not in (select payload_number from tmp_connections);
+
+        if limit_count is not null and (select count(*) from tmp_connections) >= limit_count then
+            exit;
+        end if;
     END LOOP;
     
-    -- Return results with ordering
-    RETURN QUERY
-    WITH filtered_results AS (
-        SELECT 
-            r.id,
-            r.path_matchers,
-            r.path_values,
-            r.depth,
-            r.confidence,
-            r.importance,
-            r.created_at
-        FROM result_set r
-        WHERE 
-            -- Apply min_confidence filter
-            (min_confidence = 0 OR r.confidence >= min_confidence)
-            -- Apply max_depth filter
-            AND (max_depth IS NULL OR r.depth < max_depth)
-    )
-    SELECT 
-        fr.id as transaction_id,
-        fr.path_matchers,
-        fr.path_values,
-        fr.depth,
-        fr.confidence,
-        fr.importance,
-        fr.created_at
-    FROM filtered_results fr
-    ORDER BY 
-        -- Sort by confidence (higher first)
-        fr.confidence DESC,
-        -- Then by importance
-        fr.importance DESC,
-        -- Then by depth (shallower nodes first)
-        fr.depth,
-        -- Then by transaction ID for consistency
-        fr.id
-    -- Apply the provided limit or no limit if NULL
-    LIMIT CASE WHEN limit_count IS NULL THEN 2147483647 ELSE limit_count END;
-    
-    -- Clean up
-    DROP TABLE IF EXISTS process_queue;
-    DROP TABLE IF EXISTS next_batch;
-    DROP TABLE IF EXISTS result_set;
-    DROP TABLE IF EXISTS all_processed;
-    
-    RETURN;
-END;
-$$ LANGUAGE plpgsql;
+    return query 
+        select
+            (select id from transactions where payload_number = c.payload_number order by transaction_version desc limit 1) as transaction_id,
+            (select id from transactions where payload_number = c.parent_payload_number order by transaction_version desc limit 1) as parent_transaction_id,
+            node.matcher, 
+            node.confidence, 
+            node.importance,
+            mnt.created_at
+        from tmp_connections c
+        join match_node_transactions mnt on mnt.payload_number = c.payload_number and mnt.node_id = c.node_id
+        join match_node node on node.id = c.node_id
+        join transactions t on t.payload_number = c.payload_number
+        limit coalesce(limit_count, 2147483647);
 
+    drop table if exists tmp_connections;
+END $$ language plpgsql;
+
+
+-------------------- TESTS -------------------------------------------------------------
 -- Test Function for find_connected_transactions
 CREATE OR REPLACE FUNCTION test_find_connected_transactions() RETURNS TABLE (
     case_number INT,
@@ -389,114 +217,94 @@ DECLARE
     expected_count INTEGER;
     result_set BIGINT[];
     expected_set BIGINT[];
+    latest_id BIGINT;
 BEGIN
-    create temporary table test_results (
+    CREATE TEMPORARY TABLE test_results (
         case_number INT,
         description TEXT,
         expected INT,
         actual INT,
         pass_fail BOOLEAN
-    ) on commit drop;
+    ) ON COMMIT DROP;
 
-    -- Clear all existing data
+    -- Test Case 1: 10 payloads, all connected through customer.email
+    RAISE NOTICE 'Setting up Test Case 1: 10 payloads, all connected through customer.email';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
 
-    -- Test Case 1: 10 transactions, all connected through customer.email
-    RAISE NOTICE 'Setting up Test Case 1: 10 transactions, all connected through customer.email';
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03'),
-    (4, 'TEST4', '{}', '2024-01-04'),
-    (5, 'TEST5', '{}', '2024-01-05'),
-    (6, 'TEST6', '{}', '2024-01-06'),
-    (7, 'TEST7', '{}', '2024-01-07'),
-    (8, 'TEST8', '{}', '2024-01-08'),
-    (9, 'TEST9', '{}', '2024-01-09'),
-    (10, 'TEST10', '{}', '2024-01-10');
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03'),
+    (4, 'TEST4', 1, '{}', '2024-01-04'),
+    (5, 'TEST5', 1, '{}', '2024-01-05'),
+    (6, 'TEST6', 1, '{}', '2024-01-06'),
+    (7, 'TEST7', 1, '{}', '2024-01-07'),
+    (8, 'TEST8', 1, '{}', '2024-01-08'),
+    (9, 'TEST9', 1, '{}', '2024-01-09'),
+    (10, 'TEST10', 1, '{}', '2024-01-10');
 
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'customer.email', 'test@test.com', 100, 0);
 
-    -- Insert connections one by one to avoid conflicts
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 3);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 4);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 5);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 6);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 7);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 8);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 9);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 10);
+    INSERT INTO match_node_transactions (node_id, payload_number) VALUES
+    (1, 'TEST1'), (1, 'TEST2'), (1, 'TEST3'), (1, 'TEST4'), (1, 'TEST5'),
+    (1, 'TEST6'), (1, 'TEST7'), (1, 'TEST8'), (1, 'TEST9'), (1, 'TEST10');
 
-    -- Test Case 1: All connected transactions (testing basic connection finding)
-    RAISE NOTICE 'Running Test Case 1: All connected transactions';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1));
-    expected_count := 10;
-    insert into test_results VALUES (1, 'All transactions connected through email', expected_count, result_count, result_count = expected_count);
+    RAISE NOTICE 'Running Test Case 1: All connected payloads';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1'));
+    expected_count := 9; -- root payload excluded
+    INSERT INTO test_results VALUES (1, 'All payloads connected through email', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 2: 10 transactions, some not connected
-    RAISE NOTICE 'Setting up Test Case 2: 10 transactions, some not connected';
+    -- Test Case 2: Two disconnected groups
+    RAISE NOTICE 'Setting up Test Case 2: disconnected groups';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03'),
-    (4, 'TEST4', '{}', '2024-01-04'),
-    (5, 'TEST5', '{}', '2024-01-05'),
-    (6, 'TEST6', '{}', '2024-01-06'),
-    (7, 'TEST7', '{}', '2024-01-07'),
-    (8, 'TEST8', '{}', '2024-01-08'),
-    (9, 'TEST9', '{}', '2024-01-09'),
-    (10, 'TEST10', '{}', '2024-01-10');
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03'),
+    (4, 'TEST4', 1, '{}', '2024-01-04'),
+    (5, 'TEST5', 1, '{}', '2024-01-05'),
+    (6, 'TEST6', 1, '{}', '2024-01-06'),
+    (7, 'TEST7', 1, '{}', '2024-01-07'),
+    (8, 'TEST8', 1, '{}', '2024-01-08'),
+    (9, 'TEST9', 1, '{}', '2024-01-09'),
+    (10, 'TEST10', 1, '{}', '2024-01-10');
 
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'customer.email', 'group1@test.com', 100, 0),
     (2, 'customer.email', 'group2@test.com', 100, 0);
 
-    -- Insert Group 1 connections
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 3);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 4);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 5);
-    
-    -- Insert Group 2 connections
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 6);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 7);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 8);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 9);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 10);
+    INSERT INTO match_node_transactions (node_id, payload_number) VALUES
+    (1, 'TEST1'),(1, 'TEST2'),(1, 'TEST3'),(1, 'TEST4'),(1, 'TEST5'),
+    (2, 'TEST6'),(2, 'TEST7'),(2, 'TEST8'),(2, 'TEST9'),(2, 'TEST10');
 
-    -- Test Case 2: Verify the function only finds connected transactions (not from unconnected groups)
-    RAISE NOTICE 'Running Test Case 2: Some connected transactions';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1));
-    expected_count := 5; -- Should only see transactions from group 1
-    insert into test_results VALUES (2, 'Only finds transactions from connected group', expected_count, result_count, result_count = expected_count);
+    RAISE NOTICE 'Running Test Case 2: Only group1 reachable';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1'));
+    expected_count := 4; -- excluding root
+    INSERT INTO test_results VALUES (2, 'Only finds payloads from connected group', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 3: 10 transactions in a chain (testing deep traversal)
-    RAISE NOTICE 'Setting up Test Case 3: 10 transactions in a chain';
+    -- Test Case 3: Chain traversal
+    RAISE NOTICE 'Setting up Test Case 3: chain';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03'),
-    (4, 'TEST4', '{}', '2024-01-04'),
-    (5, 'TEST5', '{}', '2024-01-05'),
-    (6, 'TEST6', '{}', '2024-01-06'),
-    (7, 'TEST7', '{}', '2024-01-07'),
-    (8, 'TEST8', '{}', '2024-01-08'),
-    (9, 'TEST9', '{}', '2024-01-09'),
-    (10, 'TEST10', '{}', '2024-01-10');
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03'),
+    (4, 'TEST4', 1, '{}', '2024-01-04'),
+    (5, 'TEST5', 1, '{}', '2024-01-05'),
+    (6, 'TEST6', 1, '{}', '2024-01-06'),
+    (7, 'TEST7', 1, '{}', '2024-01-07'),
+    (8, 'TEST8', 1, '{}', '2024-01-08'),
+    (9, 'TEST9', 1, '{}', '2024-01-09'),
+    (10, 'TEST10', 1, '{}', '2024-01-10');
 
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'link.1-2', 'chain1', 100, 0),
@@ -509,98 +317,78 @@ BEGIN
     (8, 'link.8-9', 'chain8', 100, 0),
     (9, 'link.9-10', 'chain9', 100, 0);
 
-    -- Connect transactions in a chain
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 2);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 3);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 3);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 4);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (4, 4);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (4, 5);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 5);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 6);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (6, 6);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (6, 7);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (7, 7);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (7, 8);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (8, 8);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (8, 9);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (9, 9);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (9, 10);
+    INSERT INTO match_node_transactions (node_id, payload_number) VALUES
+    (1, 'TEST1'),(1, 'TEST2'),
+    (2, 'TEST2'),(2, 'TEST3'),
+    (3, 'TEST3'),(3, 'TEST4'),
+    (4, 'TEST4'),(4, 'TEST5'),
+    (5, 'TEST5'),(5, 'TEST6'),
+    (6, 'TEST6'),(6, 'TEST7'),
+    (7, 'TEST7'),(7, 'TEST8'),
+    (8, 'TEST8'),(8, 'TEST9'),
+    (9, 'TEST9'),(9, 'TEST10');
 
-    -- Test Case 3: Full chain traversal
-    RAISE NOTICE 'Running Test Case 3: Chain with depth 10';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1));
-    expected_count := 10; -- Should find all in chain
-    insert into test_results VALUES (3, 'Finds all transactions in a chain', expected_count, result_count, result_count = expected_count);
+    RAISE NOTICE 'Running Test Case 3: full chain';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1'));
+    expected_count := 9; -- excluding root
+    INSERT INTO test_results VALUES (3, 'Finds all payloads in a chain', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 4: Chain with depth limit 5 (testing max_depth filter)
-    RAISE NOTICE 'Running Test Case 4: Chain with depth limit 5';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1, 5));
-    expected_count := 5; -- Should only reach ids 1-5 with depth limit 5
-    insert into test_results VALUES (4, 'Respects max_depth limit of 5', expected_count, result_count, result_count = expected_count);
-    
-    -- Test Case 5: Limit number of results (testing limit_count parameter)
-    RAISE NOTICE 'Running Test Case 5: Limit number of results';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1, NULL, 5));
-    expected_count := 5; -- Should only return 5 results due to limit
-    insert into test_results VALUES (5, 'Respects limit_count of 5', expected_count, result_count, result_count = expected_count);
+    RAISE NOTICE 'Running Test Case 4: depth limit 5';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1', 5));
+    expected_count := 5; -- excluding root
+    INSERT INTO test_results VALUES (4, 'Respects max_depth limit of 5', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 6: Filter by timestamp_alpha using filter_config (days)
+    RAISE NOTICE 'Running Test Case 5: limit count 5';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1', NULL, 5));
+    expected_count := 4; -- excluding root
+    INSERT INTO test_results VALUES (5, 'Respects limit_count of 5', expected_count, result_count, result_count = expected_count);
+
+    -- Test Case 6: timestamp_alpha filter
     RAISE NOTICE 'Setting up Test Case 6: timestamp_alpha filter via filter_config';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-02-15');
-    
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-02-15');
+
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'customer.email', 'email@test.com', 100, 0);
-    
-    -- Root (1) with datetime_alpha 2024-01-01, candidate 2 within 1 day, candidate 3 far away
-    INSERT INTO match_node_transactions (node_id, transaction_id, datetime_alpha) VALUES (1, 1, '2024-01-01');
-    INSERT INTO match_node_transactions (node_id, transaction_id, datetime_alpha) VALUES (1, 2, '2024-01-02');
-    INSERT INTO match_node_transactions (node_id, transaction_id, datetime_alpha) VALUES (1, 3, '2024-02-15');
-    
-    RAISE NOTICE 'Running Test Case 6: timestamp_alpha <= 1 day retains 1 & 2, excludes 3';
+
+    INSERT INTO match_node_transactions (node_id, payload_number, datetime_alpha) VALUES
+    (1, 'TEST1', '2024-01-01'),
+    (1, 'TEST2', '2024-01-02'),
+    (1, 'TEST3', '2024-02-15');
+
+    RAISE NOTICE 'Running Test Case 6';
     result_count := (SELECT COUNT(*) FROM find_connected_transactions(
-        1,
+        'TEST1',
         NULL,
         NULL,
         '{"customer.email": {"timestamp_alpha": 1}}'::jsonb
     ));
-    expected_count := 2; -- Should include 1 and 2 only
-    insert into test_results VALUES (6, 'timestamp_alpha filter via filter_config', expected_count, result_count, result_count = expected_count);
-    
+    expected_count := 1; -- root excluded
+    INSERT INTO test_results VALUES (6, 'timestamp_alpha filter via filter_config', expected_count, result_count, result_count = expected_count);
+
     -- Test Case 7: Complex connections with multiple matchers
-    RAISE NOTICE 'Setting up Test Case 7: Complex connections with multiple matchers';
+    RAISE NOTICE 'Setting up Test Case 7: complex network';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03'),
-    (4, 'TEST4', '{}', '2024-01-04'),
-    (5, 'TEST5', '{}', '2024-01-05'),
-    (6, 'TEST6', '{}', '2024-01-06'),
-    (7, 'TEST7', '{}', '2024-01-07'),
-    (8, 'TEST8', '{}', '2024-01-08'),
-    (9, 'TEST9', '{}', '2024-01-09'),
-    (10, 'TEST10', '{}', '2024-01-10');
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03'),
+    (4, 'TEST4', 1, '{}', '2024-01-04'),
+    (5, 'TEST5', 1, '{}', '2024-01-05'),
+    (6, 'TEST6', 1, '{}', '2024-01-06'),
+    (7, 'TEST7', 1, '{}', '2024-01-07'),
+    (8, 'TEST8', 1, '{}', '2024-01-08'),
+    (9, 'TEST9', 1, '{}', '2024-01-09'),
+    (10, 'TEST10', 1, '{}', '2024-01-10');
 
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'customer.email', 'email1@test.com', 100, 10),
@@ -609,194 +397,167 @@ BEGIN
     (4, 'device.id', 'device123', 70, 15),
     (5, 'ip.address', '192.168.1.1', 60, 0);
 
-    -- Create complex connections one by one
-    -- Transaction 1 has email, phone, card
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 1);
-    
-    -- Transaction 2 shares email with 1
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2);
-    
-    -- Transaction 3 shares phone with 1
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 3);
-    
-    -- Transaction 4 shares card with 1
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 4);
-    
-    -- Transaction 5 shares device with 6
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (4, 5);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (4, 6);
-    
-    -- Transaction 7, 8, 9, 10 share IP
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 7);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 8);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 9);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (5, 10);
+    INSERT INTO match_node_transactions (node_id, payload_number) VALUES
+    (1, 'TEST1'),(2, 'TEST1'),(3, 'TEST1'),
+    (1, 'TEST2'),
+    (2, 'TEST3'),
+    (3, 'TEST4'),
+    (4, 'TEST5'),(4, 'TEST6'),
+    (5, 'TEST7'),(5, 'TEST8'),(5, 'TEST9'),(5, 'TEST10');
 
-    -- Test Case 7: Complex connections (testing multi-attribute connections)
-    RAISE NOTICE 'Running Test Case 7: Complex connections with multiple matchers';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1));
-    expected_count := 4; -- Should find 1,2,3,4 (transactions directly connected to 1)
-    insert into test_results VALUES (7, 'Finds correct connections in complex network', expected_count, result_count, result_count = expected_count);
-    
-    -- Test Case 8: Confidence filter test
-    RAISE NOTICE 'Setting up Test Case 8: Confidence threshold testing';
+    RAISE NOTICE 'Running Test Case 7';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1'));
+    expected_count := 3; -- excluding root
+    INSERT INTO test_results VALUES (7, 'Finds correct connections in complex network', expected_count, result_count, result_count = expected_count);
+
+    -- Test Case 8: Confidence filter
+    RAISE NOTICE 'Setting up Test Case 8: confidence threshold';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03'),
-    (4, 'TEST4', '{}', '2024-01-04');
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03'),
+    (4, 'TEST4', 1, '{}', '2024-01-04');
 
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'high.conf', 'high', 100, 0),
     (2, 'medium.conf', 'medium', 70, 0),
     (3, 'low.conf', 'low', 30, 0);
 
-    -- Create connections with different confidence levels
-    -- Transaction 1 connects to others with different confidence
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 3);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 4);
+    INSERT INTO match_node_transactions (node_id, payload_number) VALUES
+    (1, 'TEST1'),(1, 'TEST2'),
+    (2, 'TEST1'),(2, 'TEST3'),
+    (3, 'TEST1'),(3, 'TEST4');
 
-    -- Test Case 8a: High confidence filter (should only include transactions with high conf)
-    RAISE NOTICE 'Running Test Case 8a: High confidence filter';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1, NULL, NULL, NULL, 80));
-    expected_count := 2; -- Should only include 1,2 (high confidence)
-    insert into test_results VALUES (8, 'Filters by min_confidence correctly', expected_count, result_count, result_count = expected_count);
+    RAISE NOTICE 'Running Test Case 8';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1', NULL, NULL, NULL, 80));
+    expected_count := 1; -- excluding root
+    INSERT INTO test_results VALUES (8, 'Filters by min_confidence correctly', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 9: Avoid cycles in traversal
-    RAISE NOTICE 'Setting up Test Case 9: Cycle detection';
+    -- Test Case 9: Cycle detection
+    RAISE NOTICE 'Setting up Test Case 9: cycles';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03'),
-    (4, 'TEST4', '{}', '2024-01-04');
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03'),
+    (4, 'TEST4', 1, '{}', '2024-01-04');
 
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'link.a', 'link-a', 100, 0),
     (2, 'link.b', 'link-b', 100, 0),
     (3, 'link.c', 'link-c', 100, 0);
 
-    -- Create a cycle: 1 -> 2 -> 3 -> 4 -> 1
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 2);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (2, 3);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 3);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (3, 4);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 4);
+    INSERT INTO match_node_transactions (node_id, payload_number) VALUES
+    (1, 'TEST1'),(1, 'TEST2'),
+    (2, 'TEST2'),(2, 'TEST3'),
+    (3, 'TEST3'),(3, 'TEST4'),
+    (1, 'TEST4');
 
-    -- Test Case 9: Cycle detection (should not get stuck in loop)
-    RAISE NOTICE 'Running Test Case 9: Cycle detection';
-    result_count := (SELECT COUNT(*) FROM find_connected_transactions(1));
-    expected_count := 4; -- Should find all 4 transactions
-    insert into test_results VALUES (9, 'Avoids endless loops in cycles', expected_count, result_count, result_count = expected_count);
+    RAISE NOTICE 'Running Test Case 9';
+    result_count := (SELECT COUNT(*) FROM find_connected_transactions('TEST1'));
+    expected_count := 3; -- excluding root
+    INSERT INTO test_results VALUES (9, 'Avoids endless loops in cycles', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 10: Filter by location_alpha using filter_config (meters)
-    RAISE NOTICE 'Setting up Test Case 10: location_alpha filter via filter_config';
+    -- Test Case 10: location_alpha filter
+    RAISE NOTICE 'Setting up Test Case 10: location_alpha filter';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03');
-    
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03');
+
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'customer.email', 'geo@test.com', 100, 0);
-    
-    -- Root at NYC, near candidate within ~30m, far candidate in LA
-    INSERT INTO match_node_transactions (node_id, transaction_id, long_alpha, lat_alpha) VALUES (1, 1, -74.0060, 40.7128);
-    INSERT INTO match_node_transactions (node_id, transaction_id, long_alpha, lat_alpha) VALUES (1, 2, -74.0062, 40.7130);
-    INSERT INTO match_node_transactions (node_id, transaction_id, long_alpha, lat_alpha) VALUES (1, 3, -118.2437, 34.0522);
-    
-    RAISE NOTICE 'Running Test Case 10: location_alpha <= 200m retains 1 & 2, excludes 3';
+
+    INSERT INTO match_node_transactions (node_id, payload_number, long_alpha, lat_alpha) VALUES
+    (1, 'TEST1', -74.0060, 40.7128),
+    (1, 'TEST2', -74.0062, 40.7130),
+    (1, 'TEST3', -118.2437, 34.0522);
+
+    RAISE NOTICE 'Running Test Case 10';
     result_count := (SELECT COUNT(*) FROM find_connected_transactions(
-        1,
+        'TEST1',
         NULL,
         NULL,
         '{"customer.email": {"location_alpha": 200}}'::jsonb
     ));
-    expected_count := 2; -- Should include 1 and 2 only
-    insert into test_results VALUES (10, 'location_alpha filter via filter_config', expected_count, result_count, result_count = expected_count);
+    expected_count := 1; -- root excluded
+    INSERT INTO test_results VALUES (10, 'location_alpha filter via filter_config', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 11: Combined filter on timestamp_beta (days) and location_beta (meters)
-    RAISE NOTICE 'Setting up Test Case 11: combined timestamp_beta and location_beta filters';
+    -- Test Case 11: combined timestamp_beta + location_beta
+    RAISE NOTICE 'Setting up Test Case 11: combined beta filters';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, payload, created_at) VALUES 
-    (1, 'TEST1', '{}', '2024-01-01'),
-    (2, 'TEST2', '{}', '2024-01-02'),
-    (3, 'TEST3', '{}', '2024-01-03');
-    
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES 
+    (1, 'TEST1', 1, '{}', '2024-01-01'),
+    (2, 'TEST2', 1, '{}', '2024-01-02'),
+    (3, 'TEST3', 1, '{}', '2024-01-03');
+
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'customer.email', 'both@test.com', 100, 0);
-    
-    -- Root beta at NYC, date 2024-01-01; candidate 2 close in space and time; candidate 3 close in time but far in space
-    INSERT INTO match_node_transactions (node_id, transaction_id, datetime_beta, long_beta, lat_beta) VALUES (1, 1, '2024-01-01', -74.0060, 40.7128);
-    INSERT INTO match_node_transactions (node_id, transaction_id, datetime_beta, long_beta, lat_beta) VALUES (1, 2, '2024-01-02', -74.0061, 40.7129);
-    INSERT INTO match_node_transactions (node_id, transaction_id, datetime_beta, long_beta, lat_beta) VALUES (1, 3, '2024-01-02', -118.2437, 34.0522);
-    
-    RAISE NOTICE 'Running Test Case 11: timestamp_beta <= 2d AND location_beta <= 200m retains 1 & 2 only';
+
+    INSERT INTO match_node_transactions (node_id, payload_number, datetime_beta, long_beta, lat_beta) VALUES
+    (1, 'TEST1', '2024-01-01', -74.0060, 40.7128),
+    (1, 'TEST2', '2024-01-02', -74.0061, 40.7129),
+    (1, 'TEST3', '2024-01-02', -118.2437, 34.0522);
+
+    RAISE NOTICE 'Running Test Case 11';
     result_count := (SELECT COUNT(*) FROM find_connected_transactions(
-        1,
+        'TEST1',
         NULL,
         NULL,
         '{"customer.email": {"timestamp_beta": 2, "location_beta": 200}}'::jsonb
     ));
-    expected_count := 2; -- Should include 1 and 2 only (3 fails due to distance)
-    insert into test_results VALUES (11, 'combined beta time+geo filters via filter_config', expected_count, result_count, result_count = expected_count);
+    expected_count := 1; -- root excluded
+    INSERT INTO test_results VALUES (11, 'combined beta time+geo filters', expected_count, result_count, result_count = expected_count);
 
-    -- Test Case 12: Ensure transactions sharing payload_number are excluded
-    RAISE NOTICE 'Setting up Test Case 12: identical payload numbers should not connect';
+    -- Test Case 12: only latest version returned for a payload
+    RAISE NOTICE 'Setting up Test Case 12: latest version only';
     TRUNCATE TABLE match_node_transactions CASCADE;
     TRUNCATE TABLE match_node CASCADE;
     TRUNCATE TABLE transactions CASCADE;
-    
-    INSERT INTO transactions (id, payload_number, transaction_version, is_latest, payload, created_at) VALUES
-    (1, 'SAMEPAY', 1, TRUE, '{}', '2024-03-01'),
-    (2, 'SAMEPAY', 2, TRUE, '{}', '2024-03-02');
-    
+
+    INSERT INTO transactions (id, payload_number, transaction_version, payload, created_at) VALUES
+    (1, 'SAMEPAY', 1, '{}', '2024-03-01'),
+    (2, 'SAMEPAY', 2, '{}', '2024-03-02');
+
     INSERT INTO match_node (id, matcher, value, confidence, importance) VALUES
     (1, 'customer.email', 'same@payload.com', 100, 0);
-    
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 1);
-    INSERT INTO match_node_transactions (node_id, transaction_id) VALUES (1, 2);
-    
-    RAISE NOTICE 'Running Test Case 12: ensure same payload transactions are filtered out';
-    result_set := COALESCE(ARRAY(SELECT transaction_id FROM find_connected_transactions(1)), ARRAY[]::BIGINT[]);
-    expected_set := ARRAY[1];
-    insert into test_results VALUES (
+
+    INSERT INTO match_node_transactions (node_id, payload_number) VALUES
+    (1, 'SAMEPAY');
+
+    SELECT id INTO latest_id FROM transactions WHERE payload_number = 'SAMEPAY' ORDER BY transaction_version DESC LIMIT 1;
+
+    RAISE NOTICE 'Running Test Case 12';
+    result_set := COALESCE(ARRAY(SELECT transaction_id FROM find_connected_transactions('SAMEPAY')), ARRAY[]::BIGINT[]);
+    expected_set := ARRAY[]::BIGINT[]; -- root excluded, no other payloads expected
+    INSERT INTO test_results VALUES (
         12,
-        'Excludes transactions sharing payload_number',
+        'Returns only latest version for payload',
         COALESCE(array_length(expected_set, 1), 0),
         COALESCE(array_length(result_set, 1), 0),
         result_set = expected_set
     );
 
-    return query select * from test_results;
+    RETURN QUERY SELECT * FROM test_results;
 END;
 $$ LANGUAGE plpgsql;
 
--- Run the test function and show results
 select * from test_find_connected_transactions();
+-- realign sequences after explicit inserts in tests
+truncate table match_node_transactions CASCADE;
+truncate table match_node CASCADE;
+truncate table transactions CASCADE;

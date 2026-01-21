@@ -1,6 +1,12 @@
 common:
   project_name: noname
   database_url: postgresql://postgres:postgres@0.0.0.0:5432/frida
+  redis_host: localhost
+  redis_port: 6379
+  redis_username: default
+  redis_password: default
+  redis_db: 0
+  redis_ns: frida
 
 importer:
   server_address: 0.0.0.0:3000
@@ -15,8 +21,6 @@ backend:
 processor:
   threads: 2
   log_level: info
-  sleep_ms: 1000
+  sleep_ms: 100
   metrics_address: 0.0.0.0:9100
-  matcher_configs:
-    customer.email: [100, 100]
-    customer.phone: [100, 80]
+  matcher_configs: {}

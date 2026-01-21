@@ -1,3 +1,4 @@
+#![feature(impl_trait_in_bindings)]
 pub mod executable_utils;
 pub mod graphql;
 pub mod importer;

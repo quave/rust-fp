@@ -1,8 +1,10 @@
 use crate::{
     importer::Importer,
-    model::{FraudLevel, LabelSource, ModelId, Processible, ProcessibleSerde},
-    queue::QueueService,
-    storage::{CommonStorage, ProdCommonStorage},
+    model::{FraudLevel, LabelSource, Processible, ProcessibleSerde},
+    processor::Processor,
+    queue::{ProdQueue, QueueName},
+    scorers::{ExpressionBasedScorer, Scorer},
+    storage::{CommonStorage, mongo_common::MongoCommonStorage},
 };
 use async_graphql::http::GraphiQLSource;
 use async_graphql_axum::GraphQL;
@@ -13,10 +15,13 @@ use axum::{
     response::{self, IntoResponse, Response},
     routing::{get, post},
 };
+use metrics::gauge;
+
 use clap::Parser;
-use common::config::{BackendConfig, Config};
+use common::config::Config;
 use http::header;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use mongodb::bson::oid::ObjectId;
 use once_cell::sync::OnceCell;
 use std::{error::Error, fmt::Debug, marker::PhantomData, sync::Arc};
 use tower_http::{
@@ -24,6 +29,11 @@ use tower_http::{
     trace::TraceLayer,
 };
 use tracing_subscriber::EnvFilter;
+#[cfg(not(test))]
+use tracing::{error, info};
+#[cfg(test)]
+use { println as info, println as error};
+
 
 static PROM_HANDLE: OnceCell<PrometheusHandle> = OnceCell::new();
 
@@ -59,6 +69,81 @@ pub fn init_prometheus() -> Result<PrometheusHandle, Box<dyn Error + Send + Sync
         .map_err(|e| format!("Failed to install Prometheus recorder: {}", e))?;
     let _ = PROM_HANDLE.set(handle.clone());
     Ok(handle)
+}
+
+pub fn initialize_processor_metrics(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let handle = init_prometheus()?;
+    let metrics_addr = config.processor.metrics_address.clone();
+    tokio::spawn(async move {
+        let router = axum::Router::new().route(
+            "/metrics",
+            axum::routing::get(move || {
+                let h = handle.clone();
+                async move { h.render() }
+            }),
+        );
+        match tokio::net::TcpListener::bind(&metrics_addr).await {
+            Ok(listener) => {
+                if let Err(e) = axum::serve(listener, router).await {
+                    eprintln!("Metrics server error: {}", e);
+                }
+            }
+            Err(e) => eprintln!("Failed to bind metrics server at {}: {}", metrics_addr, e),
+        }
+    });
+    // Report configured threads as a gauge
+    let g = gauge!("frida_processor_threads", "threads" => "count");
+    g.set(config.processor.threads as f64);
+    Ok(())
+}
+
+pub async fn run_processor<P: Processible + ProcessibleSerde<Id = ObjectId>>(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    initialize_tracing(&config.processor.log_level);
+    // Initialize Prometheus and spawn metrics server
+    initialize_processor_metrics(&config)?;
+
+    let common_storage =
+        Arc::new(MongoCommonStorage::new(&config.common.database_url, "frida").await?);
+    // Pick the first available channel (lowest id). Consider making this configurable.
+
+
+    let active_channels = common_storage.get_active_model_activations().await?;
+    let scorers: Vec<Arc<dyn Scorer>> = active_channels
+        .iter()
+        .map(|channel| 
+            Arc::new(ExpressionBasedScorer::new(channel.clone())) as Arc<dyn Scorer>
+        )
+        .collect();
+
+
+    let processor =
+        Arc::new(Processor::<P>::new(
+            config.common,
+            Arc::new(config.processor.clone()),
+            scorers,
+        ).await?);
+
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..config.processor.threads {
+        set.spawn(processor.clone().start_processing_worker());
+    }
+    info!("computation started");
+
+    while let Some(join_res) = set.join_next().await {
+        match join_res {
+            Ok(Ok(())) => {
+                info!("computation finished ok");
+            }
+            Ok(Err(e)) => {
+                error!("computation finished with error: {:?}", e);
+            }
+            Err(e) => {
+                error!("computation finished with join error: {:?}", e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Parser, Debug)]
@@ -106,13 +191,15 @@ pub fn initialize_tracing(log_directive: &str) {
 }
 
 pub async fn run_importer<P>(
-    config: Config,
-    queue: Arc<dyn QueueService>,
+    config: Config
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-    P: Processible + ProcessibleSerde,
+    P: Processible + ProcessibleSerde<Id = ObjectId>,
 {
-    let storage = Arc::new(ProdCommonStorage::<P>::new(&config.common.database_url).await?);
+    initialize_tracing(&config.importer.log_level);
+    let queue = Arc::new(ProdQueue::new(&config.common, QueueName::Processing).await?);
+
+    let storage = Arc::new(MongoCommonStorage::new(&config.common.database_url, "frida").await?);
     let importer = Importer::<P>::new(storage, queue);
     // init prometheus and capture handle for /metrics
     let metrics_handle = init_prometheus()?;
@@ -155,7 +242,7 @@ pub async fn import_transaction<P>(
     Json(transaction): Json<P>,
 ) -> Response
 where
-    P: Processible + ProcessibleSerde + Clone,
+    P: Processible + ProcessibleSerde<Id = ObjectId> + Clone,
 {
     match importer.import(transaction.clone()).await {
         Ok(id) => {
@@ -187,12 +274,15 @@ async fn graphiql() -> impl IntoResponse {
 }
 
 pub async fn run_backend<P>(
-    config: BackendConfig,
-    common_storage: Arc<dyn CommonStorage>,
+    config: Config
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-    P: Processible + ProcessibleSerde + Send + Sync + Clone + 'static,
+    P: Processible + ProcessibleSerde<Id = ObjectId> + Send + Sync + Clone + 'static,
 {
+    initialize_tracing(&config.backend.log_level);
+    let common_storage: Arc<dyn CommonStorage<P::Id>> =
+        Arc::new(MongoCommonStorage::new(&config.common.database_url, "frida").await?);
+
     let schema = crate::storage::graphql_schema::schema::<P>(common_storage.clone()).unwrap();
 
     let state = AppState {
@@ -202,7 +292,7 @@ where
 
     // init prometheus and capture handle for /metrics
     let metrics_handle = init_prometheus()?;
-    let metrics_path = config.metrics_path.clone();
+    let metrics_path = config.backend.metrics_path.clone();
     let app = Router::new()
         .route(
             "/api/transactions/graphql",
@@ -230,8 +320,8 @@ where
         )
         .with_state(state);
 
-    tracing::info!("Starting backend service at {}", config.server_address);
-    let listener = tokio::net::TcpListener::bind(&config.server_address).await?;
+    tracing::info!("Starting backend service at {}", config.backend.server_address);
+    let listener = tokio::net::TcpListener::bind(&config.backend.server_address).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -239,16 +329,16 @@ where
 
 // Move AppState outside the function so it's visible to handler functions
 #[derive(Clone)]
-pub struct AppState<T: Processible + Send + Sync + 'static> {
+pub struct AppState<T: Processible + Send + Sync + ProcessibleSerde<Id = ObjectId> + 'static> {
     // web_storage: Arc<dyn WebStorage<T>>,
-    common_storage: Arc<dyn CommonStorage>,
+    common_storage: Arc<dyn CommonStorage<T::Id>>,
     _phantom: PhantomData<T>,
 }
 
-impl<T: Processible + Send + Sync + 'static> AppState<T> {
+impl<T: Processible + Send + Sync + ProcessibleSerde<Id = ObjectId> + 'static> AppState<T> {
     pub fn new(
         // web_storage: Arc<dyn WebStorage<T>>,
-        common_storage: Arc<dyn CommonStorage>,
+        common_storage: Arc<dyn CommonStorage<T::Id>>,
     ) -> Self {
         Self {
             // web_storage,
@@ -261,28 +351,28 @@ impl<T: Processible + Send + Sync + 'static> AppState<T> {
 // Define the request structure for labeling
 #[derive(serde::Deserialize, Debug)]
 pub struct LabelRequest {
-    pub transaction_ids: Vec<ModelId>,
+    pub payload_numbers: Vec<String>,
     pub fraud_level: FraudLevel,
     pub fraud_category: String,
     pub labeled_by: String,
 }
 
-pub async fn label_transaction<P: Processible + Send + Sync>(
+pub async fn label_transaction<P: Processible + Send + Sync + ProcessibleSerde<Id = ObjectId>>(
     axum::extract::State(state): axum::extract::State<AppState<P>>,
     Json(label_request): Json<LabelRequest>,
 ) -> Response {
     // Log the incoming request
     tracing::info!(
-        transaction_ids = ?label_request.transaction_ids,
+        transaction_ids = ?label_request.payload_numbers,
         "Processing label request for {} transactions",
-        label_request.transaction_ids.len()
+        label_request.payload_numbers.len()
     );
 
     // Use the new business logic method
     match state
         .common_storage
         .label_transactions(
-            &label_request.transaction_ids,
+            &label_request.payload_numbers,
             &label_request.fraud_level,
             &label_request.fraud_category,
             &LabelSource::Manual,
@@ -302,7 +392,7 @@ pub async fn label_transaction<P: Processible + Send + Sync>(
         Err(e) => {
             tracing::error!(
                 error = %e,
-                transaction_count = %label_request.transaction_ids.len(),
+                transaction_count = %label_request.payload_numbers.len(),
                 "Failed to execute labeling operation"
             );
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()

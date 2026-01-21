@@ -31,13 +31,13 @@ async fn get_match_node_id(
 async fn get_transactions_for_match_node(
     db: &DatabaseConnection,
     node_id: i64,
-) -> Result<Vec<i64>, Box<dyn Error + Send + Sync>> {
+) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
     let rows = entities::match_node_transactions::Entity::find()
         .filter(entities::match_node_transactions::Column::NodeId.eq(node_id))
-        .order_by_asc(entities::match_node_transactions::Column::TransactionId)
+        .order_by_asc(entities::match_node_transactions::Column::PayloadNumber)
         .all(db)
         .await?;
-    Ok(rows.into_iter().map(|row| row.transaction_id).collect())
+    Ok(rows.into_iter().map(|row| row.payload_number).collect())
 }
 
 async fn count_all_match_node_transactions(
@@ -69,10 +69,13 @@ async fn count_match_nodes(db: &DatabaseConnection) -> Result<i64, Box<dyn Error
 
 async fn count_match_node_transactions(
     db: &DatabaseConnection,
-    transaction_id: i64,
+    payload_number: &str,
 ) -> Result<i64, Box<dyn Error + Send + Sync>> {
     let count = entities::match_node_transactions::Entity::find()
-        .filter(entities::match_node_transactions::Column::TransactionId.eq(transaction_id))
+        .filter(
+            entities::match_node_transactions::Column::PayloadNumber
+                .eq(payload_number.to_string()),
+        )
         .count(db)
         .await? as i64;
     Ok(count)
@@ -90,6 +93,8 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
     // Create transactions to test with
     let transaction_id1 = create_test_transaction(&storage.db).await?;
     let transaction_id2 = create_test_transaction(&storage.db).await?;
+    let transaction1 = storage.get_transaction(transaction_id1).await?;
+    let transaction2 = storage.get_transaction(transaction_id2).await?;
 
     // Create custom matching config using HashMap - define values explicitly for test
     let mut matcher_configs = std::collections::HashMap::new();
@@ -147,7 +152,7 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
 
     // Verify node-transaction connections
     let connection_count =
-        count_match_node_transactions(&storage.db, transaction_id1 as i64).await?;
+        count_match_node_transactions(&storage.db, &transaction1.payload_number).await?;
 
     assert_eq!(
         connection_count, 3,
@@ -188,8 +193,8 @@ async fn test_save_matching_fields() -> Result<(), Box<dyn Error + Send + Sync>>
         2,
         "Expected both transactions to be connected to the common node"
     );
-    assert_eq!(connected_transactions[0], transaction_id1 as i64);
-    assert_eq!(connected_transactions[1], transaction_id2 as i64);
+    assert_eq!(connected_transactions[0], transaction1.payload_number);
+    assert_eq!(connected_transactions[1], transaction2.payload_number);
 
     // Test idempotency - saving the same fields again should not create duplicates
     storage
@@ -280,7 +285,8 @@ async fn test_matching_excludes_same_payload_transactions()
         created_at: Set(Utc::now().naive_utc()),
         updated_at: Set(Utc::now().naive_utc()),
     };
-    let duplicate_id = duplicate_model.insert(&storage.db).await?.id;
+
+    let _duplicate_id = duplicate_model.insert(&storage.db).await?.id;
 
     let match_node = entities::match_node::ActiveModel {
         id: NotSet,
@@ -292,40 +298,34 @@ async fn test_matching_excludes_same_payload_transactions()
     .insert(&storage.db)
     .await?;
 
-    for tx_id in [root_transaction_id, duplicate_id] {
-        entities::match_node_transactions::ActiveModel {
-            node_id: Set(match_node.id),
-            transaction_id: Set(tx_id),
-            datetime_alpha: Set(None),
-            datetime_beta: Set(None),
-            long_alpha: Set(None),
-            lat_alpha: Set(None),
-            long_beta: Set(None),
-            lat_beta: Set(None),
-            long_gamma: Set(None),
-            lat_gamma: Set(None),
-            long_delta: Set(None),
-            lat_delta: Set(None),
-            created_at: Set(Utc::now().naive_utc()),
-        }
-        .insert(&storage.db)
-        .await?;
+    entities::match_node_transactions::ActiveModel {
+        node_id: Set(match_node.id),
+        payload_number: Set(root_transaction.payload_number.clone()),
+        datetime_alpha: Set(None),
+        datetime_beta: Set(None),
+        long_alpha: Set(None),
+        lat_alpha: Set(None),
+        long_beta: Set(None),
+        lat_beta: Set(None),
+        long_gamma: Set(None),
+        lat_gamma: Set(None),
+        long_delta: Set(None),
+        lat_delta: Set(None),
+        created_at: Set(Utc::now().naive_utc()),
     }
+    .insert(&storage.db)
+    .await?;
 
     let graph_results = storage
-        .find_connected_transactions(root_transaction_id, None, None, None, None)
+        .find_connected_transactions(&root_transaction.payload_number, None, None, None, None)
         .await?;
     assert_eq!(
         graph_results.len(),
-        1,
-        "Only the root transaction should be returned"
-    );
-    assert_eq!(
-        graph_results[0].transaction_id, root_transaction_id,
-        "Root transaction must remain visible for context"
+        0,
+        "Root payload should be excluded from graph results"
     );
 
-    let direct_results = storage.get_direct_connections(root_transaction_id).await?;
+    let direct_results = storage.get_direct_connections(&root_transaction.payload_number).await?;
     assert!(
         direct_results.is_empty(),
         "Direct connections must exclude duplicate payload revisions"

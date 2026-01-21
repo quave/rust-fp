@@ -39,14 +39,13 @@ CREATE TABLE IF NOT EXISTS transactions (
     FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE,
     UNIQUE (payload_number, transaction_version)
 );
-CREATE INDEX IF NOT EXISTS idx_transactions_payload_number ON transactions(payload_number);
+CREATE INDEX IF NOT EXISTS idx_transactions_payload_number_version ON transactions(payload_number, transaction_version);
+CREATE INDEX IF NOT EXISTS idx_transactions_payload_number_is_latest ON transactions(payload_number, is_latest);
 CREATE INDEX IF NOT EXISTS idx_transactions_is_latest ON transactions(is_latest);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
 CREATE INDEX IF NOT EXISTS idx_transactions_label_id ON transactions(label_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_last_scoring_date ON transactions(last_scoring_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_processing_complete ON transactions(processing_complete);
-CREATE INDEX IF NOT EXISTS idx_transactions_payload_number ON transactions(payload_number);
-CREATE INDEX IF NOT EXISTS idx_transactions_is_latest ON transactions(is_latest);
 
 
 CREATE TABLE IF NOT EXISTS scoring_models (
@@ -140,21 +139,3 @@ CREATE TABLE IF NOT EXISTS features (
 CREATE INDEX IF NOT EXISTS idx_features_created_at ON features(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_features_transaction_id ON features(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_features_schema_version_major_minor ON features(schema_version_major, schema_version_minor);
-
-CREATE TABLE IF NOT EXISTS processing_queue (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL,
-    processed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_processing_queue_transaction_id ON processing_queue(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_processing_queue_created_at ON processing_queue(created_at);
-
-CREATE TABLE IF NOT EXISTS recalculation_queue (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BIGINT NOT NULL,
-    processed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_recalculation_queue_transaction_id ON recalculation_queue(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_recalculation_queue_created_at ON recalculation_queue(created_at);

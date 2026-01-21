@@ -17,20 +17,18 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
     let connected_transactions = vec![
         ConnectedTransaction {
             transaction_id: 100,
-            path_matchers: vec!["payment.card_number".to_string()],
-            path_values: vec!["1234".to_string()],
+            parent_transaction_id: 100,
+            matcher: "payment.card_number".to_string(),
             confidence: 85,
             importance: 50,
-            depth: 1,
             created_at: chrono::Utc::now(),
         },
         ConnectedTransaction {
             transaction_id: 200,
-            path_matchers: vec!["customer.email".to_string()],
-            path_values: vec!["test@example.com".to_string()],
+            parent_transaction_id: 100,
+            matcher: "customer.email".to_string(),
             confidence: 92,
             importance: 60,
-            depth: 2,
             created_at: chrono::Utc::now(),
         },
     ];
@@ -57,7 +55,7 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
         ConnectionTrackingStorage::new(connected_transactions.clone(), direct_connections.clone());
 
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|_| Ok(vec![1]));
+    queue.expect_fetch_next().returning(|_| Ok(vec![(1, 1)]));
     queue.expect_mark_processed().returning(|_| Ok(()));
     queue.expect_enqueue().returning(|_| Ok(()));
     let queue = Arc::new(queue);
@@ -66,8 +64,8 @@ async fn test_processor_with_connections() -> Result<(), Box<dyn Error + Send + 
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage.clone()),
         queue.clone(),
         queue,
@@ -96,20 +94,18 @@ async fn test_processor_connection_verification() {
     let connected_transactions = vec![
         ConnectedTransaction {
             transaction_id: 100,
-            path_matchers: vec!["payment.card_number".to_string()],
-            path_values: vec!["1234".to_string()],
+            parent_transaction_id: 100,
+            matcher: "payment.card_number".to_string(),
             confidence: 85,
             importance: 50,
-            depth: 1,
             created_at: chrono::Utc::now(),
         },
         ConnectedTransaction {
             transaction_id: 200,
-            path_matchers: vec!["customer.email".to_string()],
-            path_values: vec!["test@example.com".to_string()],
+            parent_transaction_id: 100,
+            matcher: "customer.email".to_string(),
             confidence: 92,
             importance: 60,
-            depth: 2,
             created_at: chrono::Utc::now(),
         },
     ];
@@ -146,7 +142,7 @@ async fn test_processor_connection_verification() {
     let mut queue = MockQueueService::new();
     queue
         .expect_fetch_next()
-        .returning(move |_| Ok(vec![tx_id]));
+        .returning(move |_| Ok(vec![(tx_id, tx_id)]));
     queue.expect_mark_processed().returning(|_| Ok(()));
     queue.expect_enqueue().returning(|_| Ok(()));
     let queue = Arc::new(queue);
@@ -155,8 +151,8 @@ async fn test_processor_connection_verification() {
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage.clone()),
         queue.clone(),
         queue,
@@ -186,29 +182,26 @@ async fn test_processor_connection_feature_extraction() {
     let connected_transactions = vec![
         ConnectedTransaction {
             transaction_id: 100,
-            path_matchers: vec!["payment.card_number".to_string()],
-            path_values: vec!["1234".to_string()],
+            parent_transaction_id: 100,
+            matcher: "payment.card_number".to_string(),
             confidence: 85,
             importance: 50,
-            depth: 1,
             created_at: chrono::Utc::now(),
         },
         ConnectedTransaction {
             transaction_id: 200,
-            path_matchers: vec!["customer.email".to_string()],
-            path_values: vec!["test@example.com".to_string()],
+            parent_transaction_id: 100,
+            matcher: "customer.email".to_string(),
             confidence: 92,
             importance: 60,
-            depth: 2,
             created_at: chrono::Utc::now(),
         },
         ConnectedTransaction {
             transaction_id: 300,
-            path_matchers: vec!["shipping.address".to_string()],
-            path_values: vec!["123 Main St".to_string()],
+            parent_transaction_id: 100,
+            matcher: "shipping.address".to_string(),
             confidence: 78,
             importance: 45,
-            depth: 1,
             created_at: chrono::Utc::now(),
         },
     ];
@@ -257,7 +250,7 @@ async fn test_processor_empty_connections() {
     let storage = ConnectionTrackingStorage::new(Vec::new(), Vec::new());
 
     let mut queue = MockQueueService::new();
-    queue.expect_fetch_next().returning(|_| Ok(vec![1]));
+    queue.expect_fetch_next().returning(|_| Ok(vec![(1, 1)]));
     queue.expect_mark_processed().returning(|_| Ok(()));
     queue.expect_enqueue().returning(|_| Ok(()));
     let queue = Arc::new(queue);
@@ -266,8 +259,8 @@ async fn test_processor_empty_connections() {
 
     // Create processor
     let processor = Processor::<TestPayload, MockScorer>::new_raw(
-        ProcessorConfig::default(),
-        scorer,
+        Arc::new(ProcessorConfig::default()),
+        Arc::new(scorer),
         Arc::new(storage.clone()),
         queue.clone(),
         queue,

@@ -4,17 +4,15 @@ use std::error::Error;
 
 pub use expression_based::*;
 
-use crate::model::{Feature, ModelId, ScoringModelType};
+use crate::model::{Feature, ScoringResult, mongo_model::ScoringChannel};
 use async_trait::async_trait;
 
 #[async_trait]
-pub trait Scorer {
-    async fn score_and_save_result(
+pub trait Scorer: Send + Sync + 'static {
+    fn channel(&self) -> ScoringChannel;
+    async fn score(
         &self,
-        transaction_id: ModelId,
-        activation_id: ModelId,
-        features: Vec<Feature>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>>;
-    fn scorer_type(&self) -> ScoringModelType;
-    fn channel_id(&self) -> ModelId;
+        simple_features: &[Feature],
+        graph_features: &[Feature]
+    ) -> Result<Box<dyn ScoringResult>, Box<dyn Error + Send + Sync>>;
 }

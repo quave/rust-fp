@@ -1,11 +1,28 @@
-- [ ] Replace sqlx to seq_orm
-- [ ] Real ecom model
-- [ ] Real model indices
-- [ ] Deploy and test
-- [ ] Adjust grafana board
+- [x] Replace sqlx to seq_orm
+- [x] Real ecom model
+- [x] Test and debug with real data
+- [x] Adjust grafana board
+- [x] Test jsonb based indices
+- [x] Reseach gp indices for jsonb
+- [ ] Scorer per chanel in processor
+- [ ] Test mongo indices
+- [ ] Switch to mongo
+- [ ] Fix frontend
+- [ ] Add features, matchers with conditions, rules
 - [ ] Check and fix sql injections
-- [ ] Split common storage implementation
-- [ ] Common features
+- [ ] Parallelize saving of features, matchers, scores, extractions, direct-graph connections retrieval
+- [ ] All the entities to graphql
+- [ ] Common features (fraud in connections or so)
 - [ ] Remove unnecessery methods from processible
 - [ ] ProcessibleSerde to serde
-- [ ] All the entities to graphql
+- [ ] Transactions grid
+- [ ] Enrichments
+- [ ] Webhook
+- [ ] Split common storage implementation
+- [ ] Recalc cutoff date
+- [ ] Deletion job
+- [ ] Made model type agnostic payload
+- [ ] ML models
+- [ ] Tenants?
+- [ ] Users + auth
+- [ ] Comments

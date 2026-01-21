@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::model::Feature;
@@ -8,8 +9,10 @@ use async_graphql::Value;
 use async_graphql::dynamic::TypeRef;
 use async_trait::async_trait;
 use seaography::itertools::Itertools;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fmt::Display;
-use strum_macros::Display as MacrosDisplay;
+use strum_macros::Display as EnumDisplay;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ColumnScalar {
@@ -21,7 +24,9 @@ pub enum ColumnScalar {
 }
 
 #[async_trait]
-pub trait Processible: Send + Sync + Clone + 'static {
+pub trait Processible: Send + Sync + Clone + Serialize + DeserializeOwned + 'static {
+    type Id: Send + Sync + PartialEq + Serialize + DeserializeOwned + Clone + ToString + FromStr + 'static;
+
     fn validate(&self) -> Result<(), String>;
 
     fn payload_number(&self) -> String;
@@ -61,14 +66,14 @@ pub struct ColumnFilter<P: Processible> {
 
 #[async_trait]
 //TODO: converto to Serialize + DeserializeOwned
-pub trait ProcessibleSerde: Processible + serde::de::DeserializeOwned {
+pub trait ProcessibleSerde: Processible + DeserializeOwned {
     fn as_json(&self) -> Result<serde_json::Value, Box<dyn Error + Send + Sync>>;
     fn from_json(json: serde_json::Value) -> Result<Self, Box<dyn Error + Send + Sync>>;
 
     fn list_column_fields() -> Vec<ColumnFilter<Self>>;
 }
 
-#[derive(MacrosDisplay, Debug, Clone)]
+#[derive(EnumDisplay, Debug, Clone)]
 pub enum FilterOperator<T: ColumnValueTrait> {
     #[strum(to_string = "eq")]
     Equal(T),

@@ -1,47 +1,24 @@
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 
-use crate::{
-    model::{
-        Feature, ModelId, ScoringModelType,
-        sea_orm_storage_model::expression_rule::Model as ExpressionRule,
-    },
-    scorers::Scorer,
-    storage::CommonStorage,
+use crate::{    
+    model::{ExpressionRule, Feature, ScoringResult, mongo_model::ScoringChannel}, scorers::Scorer
 };
 use async_trait::async_trait;
 use evalexpr::*;
 
-pub struct ExpressionBasedScorer<S: CommonStorage> {
-    expression_rules: Vec<ExpressionRule>,
-    channel_id: ModelId,
-    #[allow(dead_code)]
-    channel_name: String,
-    storage: Arc<S>,
+pub struct ExpressionBasedScorer 
+{
+    activation: ScoringChannel,
 }
 
-impl<S: CommonStorage> ExpressionBasedScorer<S> {
-    pub async fn new_init(
-        channel_name: String,
-        storage: Arc<S>,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let channel = storage
-            .get_channel_by_name(&channel_name)
-            .await?
-            .ok_or_else(|| format!("Channel not found by name: {}", channel_name))?;
-        let expression_rules = storage.get_expression_rules(channel.model_id).await?;
-        Ok(Self {
-            expression_rules,
-            channel_id: channel.id,
-            channel_name,
-            storage,
-        })
-    }
+impl ExpressionBasedScorer {
+    pub fn new(activation: ScoringChannel) -> Self { Self { activation } }
 
-    fn setup_context(&self, features: &[Feature]) -> HashMapContext {
+    fn setup_context(&self, simple_features: &[Feature], graph_features: &[Feature]) -> HashMapContext {
         let mut context = HashMapContext::new();
 
         // Add features to context
-        for feature in features {
+        for feature in [simple_features, graph_features].concat() {
             // Clone the feature value for the context
             let value_clone = (*feature.value).clone();
 
@@ -71,60 +48,48 @@ impl<S: CommonStorage> ExpressionBasedScorer<S> {
 }
 
 #[async_trait]
-impl<S: CommonStorage> Scorer for ExpressionBasedScorer<S> {
-    fn scorer_type(&self) -> ScoringModelType {
-        ScoringModelType::RuleBased
+impl Scorer for ExpressionBasedScorer {
+    fn channel(&self) -> ScoringChannel {
+        self.activation.clone()
     }
-    fn channel_id(&self) -> ModelId {
-        self.channel_id
-    }
-    // we could also expose channel_name if needed later
 
-    async fn score_and_save_result(
+    async fn score(
         &self,
-        transaction_id: ModelId,
-        activation_id: ModelId,
-        features: Vec<Feature>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let context = self.setup_context(&features);
+        simple_features: &[Feature],
+        graph_features: &[Feature],
+    ) -> Result<Box<dyn ScoringResult>, Box<dyn Error + Send + Sync>> {
+        let context = self.setup_context(&simple_features, &graph_features);
 
-        let triggered_rules = self.expression_rules.iter().filter_map(|expression| {
-            // Evaluate the expression
-            match eval_with_context(&expression.rule.as_str(), &context) {
-                Ok(value) => match value {
-                    Value::Boolean(true) => Some(expression),
-                    _ => None,
-                },
-                Err(e) => {
-                    #[cfg(test)]
-                    println!(
-                        "  Error evaluating expression '{}': {} {}",
-                        expression.name, expression.rule, e
-                    );
-                    #[cfg(not(test))]
-                    tracing::error!(
-                        "Error evaluating expression '{}': {} {}",
-                        expression.name,
-                        expression.rule,
-                        e
-                    );
-                    None
+        let triggered_rules = self
+            .activation
+            .model
+            .expression_rules
+            .iter()
+            .filter_map(|expression| {
+                // Evaluate the expression
+                match eval_with_context(&expression.rule.as_str(), &context) {
+                    Ok(value) => match value {
+                        Value::Boolean(true) => Some(expression.clone()),
+                        _ => None,
+                    },
+                    Err(e) => {
+                        #[cfg(test)]
+                        println!(
+                            "  Error evaluating expression '{}': {} {}",
+                            expression.name, expression.rule, e
+                        );
+                        #[cfg(not(test))]
+                        tracing::error!(
+                            "Error evaluating expression '{}': {} {}",
+                            expression.name,
+                            expression.rule,
+                            e
+                        );
+                        None
+                    }
                 }
-            }
-        });
-
-        let total_score: i32 = triggered_rules.clone().fold(0, |a, b| a + b.score);
-        let triggered_rule_ids: Vec<ModelId> = triggered_rules.map(|rule| rule.id).collect();
-
-        self.storage
-            .save_scores(
-                transaction_id,
-                activation_id,
-                total_score,
-                &triggered_rule_ids,
-            )
-            .await?;
-
-        Ok(())
+            }).collect::<Vec<ExpressionRule>>();
+        
+        Ok(Box::new(triggered_rules))
     }
 }

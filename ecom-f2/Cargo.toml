@@ -1,9 +1,8 @@
 [package]
-name = "ecom"
+name = "ecom-f2"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-build = "build.rs"
 
 [dependencies]
 processing = { path = "../processing" }
@@ -36,6 +35,8 @@ tower = { workspace = true }
 lazy_static = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
+mongodb = {workspace = true}
+
 
 [dev-dependencies]
 common = { path = "../common" }

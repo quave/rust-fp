@@ -4,7 +4,9 @@ use std::error::Error;
 use tracing::debug;
 
 use sea_orm::ActiveValue::{NotSet, Set};
-use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement};
+use sea_orm::{
+    ActiveModelTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, Statement,
+};
 use serde_json::json;
 
 use super::setup::*;
@@ -91,9 +93,13 @@ async fn link_transaction_to_match_node(
     node_id: i64,
     transaction_id: i64,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let txn = entities::transaction::Entity::find_by_id(transaction_id)
+        .one(db)
+        .await?
+        .ok_or("transaction not found")?;
     entities::match_node_transactions::ActiveModel {
         node_id: Set(node_id),
-        transaction_id: Set(transaction_id),
+        payload_number: Set(txn.payload_number),
         datetime_alpha: Set(None),
         datetime_beta: Set(None),
         long_alpha: Set(None),
@@ -228,26 +234,14 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
 
     // Test finding all connected transactions
     let all_connected = storage
-        .find_connected_transactions(1, None, None, None, None)
+        .find_connected_transactions("1", None, None, None, None)
         .await?;
 
-    // Should find all 5 transactions
+    // Root is excluded; should find the 4 other transactions
     assert_eq!(
         all_connected.len(),
-        5,
-        "Should find all 5 connected transactions"
-    );
-
-    // Check that the confidence and path information is included
-    let tx1 = all_connected
-        .iter()
-        .find(|tx| tx.transaction_id == 1)
-        .unwrap();
-    assert_eq!(tx1.confidence, 100, "Should have confidence of 100");
-    assert_eq!(
-        tx1.path_matchers.len(),
-        1,
-        "Should have 1 path matcher for root node"
+        4,
+        "Should find all 4 connected transactions (excluding root)"
     );
 
     // Clean up before next test
@@ -310,7 +304,7 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
 
     // Test depth-limited query (max_depth=2)
     let depth_limited = storage
-        .find_connected_transactions(1, Some(2), None, None, None)
+        .find_connected_transactions("1", Some(2), None, None, None)
         .await?;
 
     // Should find exactly 2 transactions due to depth limit
@@ -322,14 +316,12 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
 
     // Verify all returned transactions have depth 2 or less
     for tx in &depth_limited {
-        assert!(tx.depth <= 2, "Transaction should have depth 2 or less");
+        assert!(tx.parent_transaction_id == 1, "Transaction should have parent transaction id 1");
         assert_ne!(
             tx.transaction_id, 4,
             "Transaction with id=4 should not be included (it's at depth 3)"
         );
     }
-
-    // Test with higher depth limit (max_depth=3) to make sure we can get deeper connections
 
     Ok(())
 }
@@ -338,15 +330,6 @@ async fn test_find_connected_transactions_api() -> Result<(), Box<dyn Error + Se
 #[serial]
 async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync>> {
     let storage = get_test_storage().await?;
-
-    // Clean up any existing test data
-    truncate_processing_tables(&storage.db).await?;
-
-    // Create transactions
-    let tx1 = create_test_transaction(&storage.db).await?;
-    let tx2 = create_test_transaction(&storage.db).await?;
-    let tx3 = create_test_transaction(&storage.db).await?;
-
     // Setup matcher nodes
     let email_node_id =
         create_test_match_node(&storage.db, "email", "test@example.com", 90, 80).await?;
@@ -354,13 +337,13 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     let phone_node_id = create_test_match_node(&storage.db, "phone", "1234567890", 85, 75).await?;
 
     // Connect transactions via match nodes using the correct node IDs
-    link_transaction_to_match_node(&storage.db, email_node_id, tx1).await?;
-    link_transaction_to_match_node(&storage.db, email_node_id, tx2).await?;
-    link_transaction_to_match_node(&storage.db, phone_node_id, tx1).await?;
-    link_transaction_to_match_node(&storage.db, phone_node_id, tx3).await?;
+    link_transaction_to_match_node(&storage.db, email_node_id, 1).await?;
+    link_transaction_to_match_node(&storage.db, email_node_id, 2).await?;
+    link_transaction_to_match_node(&storage.db, phone_node_id, 1).await?;
+    link_transaction_to_match_node(&storage.db, phone_node_id, 3).await?;
 
     // Get direct connections for tx1
-    let connections = storage.get_direct_connections(tx1).await?;
+    let connections = storage.get_direct_connections("test_payload_1").await?;
 
     // Should have two connections (to tx2 via email and to tx3 via phone)
     assert_eq!(connections.len(), 2);
@@ -370,11 +353,11 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     let mut contains_tx3_phone = false;
 
     for conn in connections {
-        if conn.transaction_id == tx2 && conn.matcher == "email" {
+        if conn.transaction_id == 2 && conn.matcher == "email" {
             contains_tx2_email = true;
             assert_eq!(conn.confidence, 90);
             assert_eq!(conn.importance, 80);
-        } else if conn.transaction_id == tx3 && conn.matcher == "phone" {
+        } else if conn.transaction_id == 3 && conn.matcher == "phone" {
             contains_tx3_phone = true;
             assert_eq!(conn.confidence, 85);
             assert_eq!(conn.importance, 75);
@@ -391,14 +374,14 @@ async fn test_get_direct_connections() -> Result<(), Box<dyn Error + Send + Sync
     );
 
     // Get direct connections for tx2 (only connected to tx1 via email)
-    let connections = storage.get_direct_connections(tx2).await?;
+    let connections = storage.get_direct_connections("test_payload_2").await?;
     assert_eq!(connections.len(), 1);
-    assert_eq!(connections[0].transaction_id, tx1);
+    assert_eq!(connections[0].transaction_id, 1);
     assert_eq!(connections[0].matcher, "email");
 
     // Get direct connections for an unconnected transaction
-    let tx4 = create_test_transaction(&storage.db).await?;
-    let connections = storage.get_direct_connections(tx4).await?;
+    let _ = create_test_transaction(&storage.db).await?;
+    let connections = storage.get_direct_connections("test_payload_4").await?;
     assert_eq!(
         connections.len(),
         0,
